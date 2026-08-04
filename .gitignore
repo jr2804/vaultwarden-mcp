@@ -7,6 +7,11 @@ wheels/
 *.egg-info
 .coverage
 
+# Native extension (built via maturin)
+*.so
+*.dylib
+*.dll
+
 # Virtual environments
 .venv
 *.env

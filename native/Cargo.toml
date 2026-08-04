@@ -1,0 +1,23 @@
+[package]
+name = "vaultwarden_mcp_native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "PyO3 bindings for vaultwarden-cli, powering the vaultwarden-mcp MCP server"
+license = "MIT"
+
+[lib]
+name = "vaultwarden_mcp_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "anyhow"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+vaultwarden-cli = { path = "/opt/workspace/tmp/vw-cli-src" }
+anyhow = { version = "1", features = ["std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+strip = "symbols"
+codegen-units = 1

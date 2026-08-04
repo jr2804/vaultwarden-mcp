@@ -5,6 +5,9 @@
 node = "latest"
 bun = "latest"
 
+# Rust toolchain for PyO3 native module compilation
+rust = "1.97"
+
 # Linter/formatter/type checker tools
 "ruff" = "latest"
 "ty" = "latest"

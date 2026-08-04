@@ -2,58 +2,102 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+
 import typer
 
-from vaultwarden_mcp.cli import args
 from vaultwarden_mcp.cli.app import app
 
-# Application name for environment variables
 APP_NAME_UPPERCASE = "VAULTWARDEN_MCP"
 
-# Default command (runs when no command provided)
+logger = logging.getLogger(__name__)
+
+
+@app.command()
+def serve(
+    transport: str = typer.Option(
+        "stdio",
+        "--transport",
+        "-t",
+        help="Transport to use: 'stdio' (default) or 'http'",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        "-H",
+        help="HTTP host (only for --transport http)",
+    ),
+    port: int = typer.Option(
+        8080,
+        "--port",
+        "-p",
+        help="HTTP port (only for --transport http)",
+    ),
+) -> None:
+    """Start the Vaultwarden MCP server.
+
+    By default, the server runs over stdio for integration with MCP clients.
+    Use --transport http for a long-running HTTP endpoint.
+    """
+    if transport == "stdio":
+        from vaultwarden_mcp.mcp_server import main as mcp_main
+        asyncio.run(mcp_main())
+    elif transport == "http":
+        from vaultwarden_mcp.mcp_server_http import serve_http
+        asyncio.run(serve_http(host=host, port=port))
+    else:
+        raise typer.BadParameter(f"Unknown transport: {transport}. Use 'stdio' or 'http'.")
+
+
+@app.command()
+def list_tools() -> None:
+    """List available MCP tools without starting the server."""
+    from vaultwarden_mcp.mcp_server import list_tools as _list_tools
+    result = asyncio.run(_list_tools(None, None))
+    print(json.dumps([
+        {
+            "name": t.name,
+            "description": t.description,
+            "inputSchema": t.input_schema,
+        }
+        for t in result.tools
+    ], indent=2))
+
+
+@app.command()
+def check_account(
+    account: str = typer.Option(
+        "default",
+        "--account",
+        "-a",
+        help="Account key to check (e.g. 'jan' or 'openclaw')",
+    ),
+) -> None:
+    """Check account credentials and vault connectivity.
+
+    Attempts to initialize the VaultwardenSession for the given account.
+    If credentials are wrong, the credential verification safeguard
+    will catch it and report the error.
+    """
+    from vaultwarden_mcp.mcp_server import _get_or_init_session
+    try:
+        session = _get_or_init_session(account)
+        summary = session.sync()
+        print(f"Account '{account}': OK")
+        print(f"  Server:  {session.server}")
+        print(f"  Email:   {summary.email}")
+        print(f"  Ciphers: {summary.cipher_count}")
+        print(f"  Unlocked: {session.is_unlocked}")
+    except Exception as e:
+        print(f"Account '{account}': FAILED")
+        print(f"  Error: {e}")
+
 
 @app.command()
 def default() -> None:
     """Default command showing welcome message."""
-    typer.echo(f"Welcome to Vaultwarden MCP!")
-    typer.echo("Use --help to see available commands.")
-
-# Greet command
-
-@app.command()
-def greet(
-    name: args.NameArg,
-    input_file: args.InputFileArg = None,
-    output_file: args.OutputFile = None,
-    cache: args.Cache = True,
-) -> None:
-    """Greet a person by name."""
-    if input_file:
-        # Read names from file
-        names = [line.strip() for line in input_file if line.strip()]
-        for n in names:
-            typer.echo(f"Hello, {n}!")
-    else:
-        typer.echo(f"Hello, {name}!")
-
-    # Show option values (for demonstration)
-    if output_file:
-        typer.echo(f"Output file: {output_file}")
-    typer.echo(f"Cache: {'enabled' if cache else 'disabled'}")
-
-# Add command
-
-@app.command()
-def add(
-    number1: args.NumberArg1,
-    number2: args.NumberArg2,
-    output_file: args.OutputFile = None,
-) -> None:
-    """Add two numbers together."""
-    result = number1 + number2
-    typer.echo(f"The sum of {number1} and {number2} is {result}")
-
-    if output_file:
-        with open(output_file, "w") as f:
-            f.write(str(result))
-        typer.echo(f"Result written to {output_file}")
+    typer.echo("Vaultwarden MCP Server")
+    typer.echo("Run 'vaultwarden-mcp serve --help' to start the server.")
+    typer.echo("Run 'vaultwarden-mcp --help' to see all commands.")
