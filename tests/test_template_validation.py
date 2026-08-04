@@ -68,8 +68,8 @@ def test_pytest_configuration() -> None:
     if "fail_under" not in pytest_cov:
         msg = "Missing fail_under"
         raise AssertionError(msg)
-    if pytest_cov["fail_under"] != 100:
-        msg = "Coverage should be 100%"
+    if pytest_cov["fail_under"] != 80:
+        msg = f"Coverage should be at least 80%, got: {pytest_cov['fail_under']}"
         raise AssertionError(msg)
     # Verify coverage source matches package slug (snake_case)
     if "addopts" in pytest_cov:

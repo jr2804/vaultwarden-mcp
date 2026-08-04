@@ -35,12 +35,6 @@ dev = [
 [project.scripts]
 vaultwarden-mcp = "vaultwarden_mcp.cli.app:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.uv-dynamic-versioning]
-fallback-version = "0.0.0"
-
 [tool.maturin]
 python-source = "src"
 module-name = "vaultwarden_mcp._native"
