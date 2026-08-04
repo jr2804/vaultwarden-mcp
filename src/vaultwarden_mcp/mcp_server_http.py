@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 
-from mcp.server import NotificationOptions
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
