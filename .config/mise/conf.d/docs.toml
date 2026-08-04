@@ -1,0 +1,5 @@
+
+[tasks.docs]
+description = "Build documentation"
+run = ["uv run zensical build"]
+

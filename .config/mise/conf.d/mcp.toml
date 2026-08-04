@@ -1,0 +1,6 @@
+
+[tools]
+"pipx:ai-slop-detector" = { version = "latest", extras = ["all"] }
+
+
+
