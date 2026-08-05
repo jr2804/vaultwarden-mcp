@@ -25,8 +25,16 @@ Download the latest release binary from [GitHub Releases](https://github.com/jr2
 curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-linux-x86_64 \
   -o vaultwarden-mcp && chmod +x vaultwarden-mcp
 
+# Linux (ARM64)
+curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-linux-aarch64 \
+  -o vaultwarden-mcp && chmod +x vaultwarden-mcp
+
 # macOS (Apple Silicon)
 curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-macos-aarch64 \
+  -o vaultwarden-mcp && chmod +x vaultwarden-mcp
+
+# macOS (Intel)
+curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-macos-x86_64 \
   -o vaultwarden-mcp && chmod +x vaultwarden-mcp
 
 # Windows (PowerShell)

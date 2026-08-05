@@ -21,11 +21,6 @@ jobs:
             artifact_name: vaultwarden-mcp-linux-x86_64
             binary_name: vaultwarden-mcp
 
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-            artifact_name: vaultwarden-mcp-linux-x86_64-musl
-            binary_name: vaultwarden-mcp
-
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             artifact_name: vaultwarden-mcp-linux-aarch64
@@ -120,7 +115,6 @@ jobs:
             ```
           files: |
             artifacts/vaultwarden-mcp-linux-x86_64/vaultwarden-mcp
-            artifacts/vaultwarden-mcp-linux-x86_64-musl/vaultwarden-mcp
             artifacts/vaultwarden-mcp-linux-aarch64/vaultwarden-mcp
             artifacts/vaultwarden-mcp-windows-x86_64/vaultwarden-mcp.exe
             artifacts/vaultwarden-mcp-macos-aarch64/vaultwarden-mcp
