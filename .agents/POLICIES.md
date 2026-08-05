@@ -21,34 +21,29 @@ Always applicable. Boundaries, priorities, verification, checklist.
 - NEVER run destructive commands (`rm -rf`, `git reset --hard`,
   `git push --force`) without explicit confirmation.
 - NEVER delete or move files without explicit instruction.
-- NEVER create temp files in project root. Use [`.tmp/`](../.tmp/) (already gitignored).
+- NEVER create temp files in project root. Use `.tmp/` (gitignored).
 - NEVER bump MCP spec version past **2026-07-28 (v3.0)** without recording the
   decision in [.agents/HISTORY.md](HISTORY.md).
 
 ## Change constraints
 
 - Minimal, surgical edits. Preserve existing style.
-- No new dependencies without explicit instruction. Add to the right manifest
-  (`native/Cargo.toml` for Rust, `pyproject.toml` for Python), never to both.
+- New dependencies need explicit instruction. Right manifest per language
+  (`native/Cargo.toml` for Rust, `pyproject.toml` for Python).
 - No unrelated refactoring while fixing a bug.
-- When changing tests, update only directly affected tests.
-- Production changes go in Rust ([native/src/](../native/src/)). Python edits
+- Update only directly affected tests.
+- Production changes in Rust ([native/src/](../native/src/)); Python edits
   under [src/vaultwarden_mcp/](../src/vaultwarden_mcp/) are test-client only.
 
 ## Code quality
 
-Universal defaults. Project-specific standards live in child AGENTS.md.
-
-- **SRP** — one reason to change per module/function. If a name needs "and",
-  split it.
-- **DRY** — before adding a function/constant/config block, check whether one
-  already exists. Extract on the _third_ occurrence (Rule of Three), not earlier.
-- **Redundant code** — remove dead branches, unreachable conditions, and unused
+- **SRP** — one reason to change per module/function.
+- **DRY** — extract on the _third_ occurrence (Rule of Three).
+- **Redundant code** — remove dead branches, unreachable conditions, unused
   params/imports before finishing.
-- **Duplication vs. abstraction** — prefer a little duplication over the wrong
-  premature abstraction.
-- No new code-quality tooling, patterns, or value-object rules by default — opt
-  in per project.
+- **Duplication vs. abstraction** — prefer a little duplication over the
+  wrong premature abstraction.
+- No new code-quality tooling, patterns, or value-object rules by default.
 
 ## Completion checklist
 
@@ -66,51 +61,63 @@ drift apart as rules change.
 
 ### Where a rule lives
 
-Answer one question: **what is the highest (most general) tier that fully
-applies?** Put the rule there and nowhere else.
-
-- Applies to **all code in the project**, not one subtree →
-  `.agents/POLICIES.md`. This is the default. When unsure, it goes here.
-- Meaningful **only inside one subtree** (e.g. framework-specific template
-  rules) → that subtree's `AGENTS.md`.
-- Just helps navigation → the parent's Child DOX Index, nothing else.
-
-`.agents/POLICIES.md` is the gravity well for universal rules. A subtree
-AGENTS.md only contains rules that are meaningless outside that subtree.
+- Applies to **all code** → `.agents/POLICIES.md` (default).
+- Meaningful **only in one subtree** → that subtree's `AGENTS.md`.
+- Just helps navigation → parent's Child DOX Index.
 
 ### Reference, don't restate
 
-A rule appears in **exactly one file**. Every other file that touches it
-uses a **pointer line**: `<topic> — see <file>`. Never copy the rule, the
-rationale, or the code example into the second file. If the canonical home
-needs a code example, it lives there once — linked to, never duplicated.
+A rule appears in **exactly one file**. Every other file uses a **pointer line**:
+`<topic> — see <file>`. Never copy the rule, rationale, or code example.
 
 ### Rule first, rationale second, never third
 
 A DOX line is the rule. If a rationale is costly to rediscover, add one
-short clause. Never multi-paragraph explanations or more than one
-❌/✅ code pair per rule — those belong in a skill or a [docs/](../docs/) page, linked
-once.
+short clause. Never multi-paragraph explanations or ❌/✅ code pairs — those
+belong in a skill or a [docs/](../docs/) page.
 
 ### Content rules
 
-- **No tree views.** Generate on demand with `rg --files | tree-cli --fromfile`.
+- **No tree views.** Use `rg --files | tree-cli --fromfile` on demand.
 - **No history.** Git log has it. Record only decisions costly to rediscover
   (in [.agents/HISTORY.md](HISTORY.md) with commit refs).
 - **No TODO lists.** Use issue trackers or beads.
 
 ### Size budget
 
-- `.agents/` files: ≤ **120 lines**. They are always-injected context.
-- Subtree `AGENTS.md`: ≤ **250 lines**. Loaded cumulatively with every
-  parent on entry — the deep-path cost adds up fast.
+- `.agents/` files: ≤ **120 lines** (always-injected context).
+- Subtree `AGENTS.md`: ≤ **250 lines** (cumulative with every parent).
 
-Exceeding the budget signals the doc is restating instead of pointing, or
-hoarding rationale. Cut first; split the subtree only as a last resort.
+Exceeding the budget signals the doc is restating instead of pointing. Cut
+first; split the subtree only as a last resort.
+
+## Implementation Plans
+
+- Plans, refactoring plans, and design docs go in `.agents/plans/` — NOT under
+
+  version control (gitignored).
+
+- Name descriptively with phase-number prefixes so file order matches
+
+  implementation order, e.g. `01-sub-feature.md`, `02-next-sub-feature.md`.
+
+- NEVER commit plans to git. They are mutable working artifacts.
+
+- Shipped docs (user-facing guides, API references) go in `docs/` and ARE committed.
+
+## Documentation
+
+- When `.agents/HISTORY.md` grows too large, archive older entries to
+
+  `.agents/history/`. Reference them from `.agents/HISTORY.md`.
+- Completed plans may be archived to `.agents/history/` for long-term reference.
+- `.agents/history/` IS version-controlled (durable decision records).
 
 ## Verification
 
-Run the narrowest relevant checks for the changed surface. Standard gates:
+Run the narrowest relevant checks for the changed surface. Full task list:
+`mise run --list`. CI gates in
+[`.config/mise/conf.d/quality.toml`](../.config/mise/conf.d/quality.toml).
 
 ```bash
 # Rust (production)
@@ -121,15 +128,12 @@ cargo test  --manifest-path native/Cargo.toml
 # Python (test client + lint)
 uv run ruff check .
 uv run ruff format --check .
-uv run ty check src tests          # or mypy if ty not configured
+uv run ty check src tests
 uv run pytest --cov
 
 # Docs
 uv run zensical build --strict
 ```
-
-Full task list: `mise run --list`. CI quality gates are defined in
-[`.config/mise/conf.d/quality.toml`](../.config/mise/conf.d/quality.toml).
 
 ## Response format
 

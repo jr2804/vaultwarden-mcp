@@ -21,7 +21,7 @@ uv run pytest       # black-box MCP tests via FastMCP
 
 ## Project Structure
 
-```
+```text
 vaultwarden-mcp/
 ├── native/                     # Rust MCP server
 │   ├── src/

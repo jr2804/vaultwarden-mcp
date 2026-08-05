@@ -21,13 +21,15 @@ How to keep `.agents/` files current.
 
 ## File update triggers
 
-| File | Update when |
-| ------ | ------------- |
-| [ONBOARDING.md](ONBOARDING.md) | Project structure, tooling, or entry points change |
-| [POLICIES.md](POLICIES.md) | Boundaries, priorities, or verification change |
-| [FILES.md](FILES.md) | Path constants, config keys, or naming conventions change |
-| [HISTORY.md](HISTORY.md) | Notable decision made or resolved |
-| [MAINTENANCE.md](MAINTENANCE.md) | Maintenance procedures, triggers, or principles change |
+| File                             | Update when                                               |
+| -------------------------------- | --------------------------------------------------------- |
+| [ONBOARDING.md](ONBOARDING.md)   | Project structure, tooling, or entry points change        |
+| [POLICIES.md](POLICIES.md)       | Boundaries, priorities, or verification change            |
+| [FILES.md](FILES.md)             | Path constants, config keys, or naming conventions change |
+| [HISTORY.md](HISTORY.md)         | Notable decision made or resolved                         |
+| [MAINTENANCE.md](MAINTENANCE.md) | Maintenance procedures, triggers, or principles change    |
+| `plans/`                         | New feature implementation starts                         |
+| `history/`                       | HISTORY.md overflow or completed plans archived           |
 
 ## Subtree AGENTS.md triggers
 

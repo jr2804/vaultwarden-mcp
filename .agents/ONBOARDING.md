@@ -13,7 +13,7 @@ binary exposing `search`, `get_cipher`, `sync`, `list_accounts` over MCP v3.0
 ## Quick start
 
 ```bash
-# Build (Rust binary — production)
+# Build (Rust binary — production) — also via `mise run server-release`
 cargo build --release --manifest-path native/Cargo.toml
 
 # Build (Python test client)
@@ -29,16 +29,49 @@ uv run ruff check . && uv run ruff format .
 uv run zensical serve    # http://localhost:8000
 ```
 
+## CLI surface
+
+```bash
+vaultwarden-mcp serve --transport stdio              # default; for Claude Desktop
+vaultwarden-mcp serve --transport http --host 127.0.0.1 --port 8080
+```
+
+Binary lives at `native/target/release/vaultwarden-mcp` (or `vaultwarden-mcp.exe` on Windows).
+The `http` feature is on by default — build stdio-only with
+`cargo build --manifest-path native/Cargo.toml --no-default-features`.
+
+## Configuration
+
+Two layers, merged with env vars winning per field:
+
+1. **TOML config** — `--config <path>` flag, or auto-discovered at
+   `./vaultwarden-mcp.toml` → `~/.config/vaultwarden-mcp/config.toml`. See
+   [`vaultwarden-mcp.toml.example`](../vaultwarden-mcp.toml.example).
+2. **Env vars** — single-account mode reads `VAULTWARDEN_{SERVER,CLIENT_ID,CLIENT_SECRET,PASSWORD}`;
+   multi-account mode reads `VAULTWARDEN_ACCOUNTS=jan,work` plus per-account
+   `VAULTWARDEN_ACCOUNT_<NAME>_*` vars. Full matrix — [.agents/FILES.md](FILES.md).
+
+Secret fields can be referenced via `secret://<name>` URIs (parsed today;
+secretspec runtime resolution is the planned follow-up —
+[.agents/plans/01-config.md](../.agents/plans/01-config.md)).
+
+```bash
+# Show effective config
+vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
+```
+
 ## Entry points (read these first)
 
 | File | Why |
 | ------ | ----- |
 | [AGENTS.md](../AGENTS.md) | Root rail — rules + `.agents/` index |
 | [.agents/POLICIES.md](POLICIES.md) | Boundaries, priorities, verification |
-| [.agents/FILES.md](FILES.md) | Source-of-truth locations |
+| [.agents/FILES.md](FILES.md) | Source-of-truth locations, env-var matrix |
 | [docs/architecture.md](../docs/architecture.md) | System diagram, data flow, security model |
-| [native/src/lib.rs](../native/src/lib.rs) | Production entry point (Rust) |
-| [native/src/mcp.rs](../native/src/mcp.rs) | `ServerHandler` — list/call tools |
+| [native/src/main.rs](../native/src/main.rs) | CLI entrypoint (`clap`): `serve` + `print-config` subcommands, transport + config selection |
+| [native/src/lib.rs](../native/src/lib.rs) | Library root: `VaultwardenSession`, REST client, crypto (PBKDF2, AES decrypt) |
+| [native/src/mcp.rs](../native/src/mcp.rs) | `ServerHandler` impl — `search`, `get_cipher`, `sync`, `list_accounts`; `AccountConfig` struct |
+| [native/src/config.rs](../native/src/config.rs) | TOML config-file loader + env-var merge + `secret://` URI validation |
 
 ## Where to dig deeper
 

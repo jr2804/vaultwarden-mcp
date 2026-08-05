@@ -13,10 +13,14 @@ Kept compact — agents hallucinate less when they know where definitions live.
 
 | What | Where | Key names |
 | ------ | ------- | ----------- |
-| **Production entry (Rust)** | [`native/src/main.rs`](../native/src/main.rs) | CLI args, transport selection |
+| **Production entry (Rust)** | [`native/src/main.rs`](../native/src/main.rs) | CLI args, transport selection, config-file loader |
 | **MCP server handlers** | [`native/src/mcp.rs`](../native/src/mcp.rs) | `ServerHandler` impl, tool list |
 | **Vault client + crypto** | [`native/src/lib.rs`](../native/src/lib.rs) | `VaultwardenSession`, key derivation, decrypt |
-| **Rust crate config** | [`native/Cargo.toml`](../native/Cargo.toml) | `rmcp` version, `vaultwarden-cli`, features (`http`) |
+| **Config file loader** | [`native/src/config.rs`](../native/src/config.rs) | TOML parse, env-var merge, `secret://` URI validation |
+| **Rust crate config** | [`native/Cargo.toml`](../native/Cargo.toml) | `rmcp` version, `vaultwarden-cli`, `toml`, features (`http`) |
+| **Bundled config file (example)** | [`vaultwarden-mcp.toml.example`](../vaultwarden-mcp.toml.example) | Annotated sample config file |
+| **secretspec manifest (scaffold)** | [`secretspec.toml`](../secretspec.toml) | Secret declarations for the upcoming secretspec integration |
+| **Config SPEC** | [`.agents/plans/01-config.md`](../.agents/plans/01-config.md) | Design contract for the TOML config + secretspec feature |
 | **Python test client** | [`src/vaultwarden_mcp/__init__.py`](../src/vaultwarden_mcp/__init__.py) | FastMCP client glue |
 | **Python metadata** | [`src/vaultwarden_mcp/__about__.py`](../src/vaultwarden_mcp/__about__.py) | `__version__` |
 | **Test fixtures** | [`tests/conftest.py`](../tests/conftest.py) | Binary builder, env setup, MCP session |

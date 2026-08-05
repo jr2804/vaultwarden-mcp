@@ -1,8 +1,10 @@
 # Vaultwarden MCP
 
-MCP server for [Vaultwarden](https://github.com/dani-garcia/vaultwarden) — search, read, and sync vault entries via the Model Context Protocol.
+MCP server for [Vaultwarden](https://github.com/dani-garcia/vaultwarden) — search, read, and sync
+vault entries via the Model Context Protocol.
 
-**Pure Rust binary** using [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk) (MCP v3.0, 2026-07-28 spec). Multi-account support. Stdio and Streamable HTTP transports.
+**Pure Rust binary** using [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)
+(MCP v3.0, 2026-07-28 spec). Multi-account support. Stdio and Streamable HTTP transports.
 
 ## Features
 
@@ -34,13 +36,15 @@ curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaul
   -o vaultwarden-mcp && chmod +x vaultwarden-mcp
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-windows-x86_64.exe" \
-  -OutFile vaultwarden-mcp.exe
+$url = "https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-windows-x86_64.exe"
+Invoke-WebRequest -Uri $url -OutFile vaultwarden-mcp.exe
 ```
 
 ??? tip "Build from source"
 
-    Requires Rust 1.88+. See the [Build guide](build.md) for instructions.
+```text
+Requires Rust 1.88+. See the [Build guide](build.md) for instructions.
+```
 
 ## Configuration
 
@@ -87,7 +91,8 @@ npx add-mcp /path/to/vaultwarden-mcp --args "serve --transport stdio" \
   --env VAULTWARDEN_PASSWORD="your-vault-password"
 ```
 
-`add-mcp` supports Claude Code, Codex, Cursor, OpenCode, VS Code, Gemini CLI, and [17 more agents](https://github.com/neon-solutions/add-mcp#supported-agents).
+`add-mcp` supports Claude Code, Codex, Cursor, OpenCode, VS Code, Gemini CLI, and
+[17 more agents](https://github.com/neon-solutions/add-mcp#supported-agents).
 
 ## MCP Tools
 
@@ -114,15 +119,16 @@ vaultwarden-mcp --version
 ## Security
 
 - **No plaintext secrets stored** — all cipher operations decrypt in-memory only
-- **Credential verification on connect** — wrong password or credential mismatch caught immediately (HMAC check on symmetric key)
+- **Credential verification on connect** — wrong password or credential mismatch
+  caught immediately (HMAC check on symmetric key)
 - **Per-account isolation** — separate sessions per vault identity
 - **No logging of secrets** — tracing limited to operation metadata
 
 ## Documentation
 
-- [Architecture](architecture.md) — system design, data flow, layer responsibilities
-- [Build from source](build.md) — compiling the Rust binary
-- [Contributing](contributing.md) — development workflow, PR guidelines
+- [Architecture](docs/architecture.md) — system design, data flow, layer responsibilities
+- [Build from source](docs/build.md) — compiling the Rust binary
+- [Contributing](docs/contributing.md) — development workflow, PR guidelines
 
 ## License
 

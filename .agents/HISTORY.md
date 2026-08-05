@@ -18,6 +18,4 @@ Acts as simple long-term memory for the project.
 
 ## Entries
 
-| Date | Decision | Rationale | Git ref |
-|------|----------|-----------|---------|
-| 2026-08-05 | Adopt agents-scaffold DOX framework | Standardize AGENTS.md hierarchy; move long content out of always-injected context; enable subtree-specific contracts | (this commit) |
+[None yet — add entries as decisions are made.]

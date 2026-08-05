@@ -45,16 +45,20 @@ may leave docs unchanged, but the DOX pass still must happen.
 
 ### Hierarchy
 
-- Root AGENTS.md is the DOX rail: project-wide instructions, global preferences, durable workflow rules, and the top-level Child DOX Index
+- Root AGENTS.md is the DOX rail: project-wide instructions, global preferences,
+  durable workflow rules, and the top-level Child DOX Index
 - Child AGENTS.md files own domain-specific instructions and their own Child DOX Index
 - Each parent explains what its direct children cover and what stays owned by the parent
 - The closer a doc is to the work, the more specific and practical it must be
 
 ### Child Doc Shape
 
-- Create a child AGENTS.md when a folder becomes a durable boundary with its own purpose, rules, responsibilities, workflow, materials, or quality standards
-- Work Guidance must reflect the current standards of the project or user instructions; if there are no specific standards or instructions yet, leave it empty
-- Verification must reflect an existing check; if no verification framework exists yet, leave it empty and update it when one exists
+- Create a child AGENTS.md when a folder becomes a durable boundary with its own
+  purpose, rules, responsibilities, workflow, materials, or quality standards
+- Work Guidance must reflect the current standards of the project or user
+  instructions; if there are no specific standards or instructions yet, leave it empty
+- Verification must reflect an existing check; if no verification framework exists
+  yet, leave it empty and update it when one exists
 
 Default section order:
 
@@ -90,13 +94,15 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ### Child DOX Index
 
-| Path | Owns | Read when |
-| ------ | ------ | ----------- |
-| `native/AGENTS.md` | Rust MCP server: `rmcp` handlers, `vaultwarden-cli` crypto, transport selection | Touching `native/src/**` or building the binary |
-| `tests/AGENTS.md` | Black-box MCP testing via FastMCP stdio/HTTP client, fixtures, conftest | Touching `tests/**` or running the test suite |
-| `docs/AGENTS.md` | User-facing docs (Zensical), build, architecture, contributing | Touching `docs/**` or `zensical.toml` |
-| `.config/mise/AGENTS.md` | Mise task/tooling config fragments (`conf.d/*.toml`) | Touching `.config/mise/**` |
-| `src/vaultwarden_mcp/AGENTS.md` | Python test client package (`fastmcp` glue) | Touching `src/vaultwarden_mcp/**` |
+| Path                            | Owns                                                                            | Read when                                       |
+| ------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `native/AGENTS.md`              | Rust MCP server: `rmcp` handlers, `vaultwarden-cli` crypto, transport selection | Touching `native/src/**` or building the binary |
+| `tests/AGENTS.md`               | Black-box MCP testing via FastMCP stdio/HTTP client, fixtures, conftest         | Touching `tests/**` or running the test suite   |
+| `docs/AGENTS.md`                | User-facing docs (Zensical), build, architecture, contributing                  | Touching `docs/**` or `zensical.toml`           |
+| `.config/mise/AGENTS.md`        | Mise task/tooling config fragments (`conf.d/*.toml`)                            | Touching `.config/mise/**`                      |
+| `src/vaultwarden_mcp/AGENTS.md` | Python test client package (`fastmcp` glue)                                     | Touching `src/vaultwarden_mcp/**`               |
+| `plans/`                        | Working on a feature                                                            | Implementation plans (gitignored)               |
+| `history/`                      | Background (overflow)                                                           | Archived decisions and completed plans          |
 
 ## .agents/ files — demand-loaded, not always injected
 
@@ -107,6 +113,8 @@ When the user requests a durable behavior change, record it here or in the relev
 | `FILES.md`       | Touching files or config    | Path constants, source-of-truth locations       |
 | `HISTORY.md`     | Background (past decisions) | Recorded decisions with git refs                |
 | `MAINTENANCE.md` | Changing `.agents/`         | How to keep DOX files current                   |
+| `plans/`         | Working on a feature       | Implementation plans (gitignored)               |
+| `history/`       | Background (overflow)      | Archived decisions and completed plans          |
 
 ## Tools & skills
 
@@ -121,14 +129,22 @@ When the user requests a durable behavior change, record it here or in the relev
 
 _Always-injected_ — keep minimal. Everything else → `.agents/` files.
 
-1. **Production code is Rust** — `native/src/`. The Python package under `src/vaultwarden_mcp/` is the **test client only**, not production.
-2. **MCP spec version** is pinned to **2026-07-28 (v3.0)** via `rmcp` v3.1. Do not bump without a recorded decision in `.agents/HISTORY.md`.
-3. **No plaintext secrets in code or tests** — credentials come from `VAULTWARDEN_*` env vars; HMAC-verified on connect, wrong password aborts.
-4. **Tooling is mise** — Rust toolchain, Python via `uv`, lint/format/test/docs live in `.config/mise/conf.d/*.toml`. Add tasks there, not in `pyproject.toml` scripts.
-5. **No temp files in repo root** — use `.tmp/` (already gitignored). Never commit `*.so`, `*.dll`, `target/`, `.venv/`.
-6. **Path conventions** — Rust modules under `native/src/`; Python test client under `src/vaultwarden_mcp/`; tests under `tests/`; docs under `docs/`.
-7. **Prefer smallest correct change** — surgical edits over rewrites; no unrelated refactoring while fixing a bug.
-8. **Docs of record** — public behavior lives in `docs/` (Zensical). Do not duplicate; AGENTS.md files point to docs.
+1. **Production code is Rust** — `native/src/`. The Python package under
+   `src/vaultwarden_mcp/` is the **test client only**, not production.
+2. **MCP spec version** is pinned to **2026-07-28 (v3.0)** via `rmcp` v3.1. Do not
+   bump without a recorded decision in `.agents/HISTORY.md`.
+3. **No plaintext secrets in code or tests** — credentials come from
+   `VAULTWARDEN_*` env vars; HMAC-verified on connect, wrong password aborts.
+4. **Tooling is mise** — Rust toolchain, Python via `uv`, lint/format/test/docs
+   live in `.config/mise/conf.d/*.toml`. Add tasks there, not in `pyproject.toml` scripts.
+5. **No temp files in repo root** — use `.tmp/` (already gitignored). Never commit
+   `*.so`, `*.dll`, `target/`, `.venv/`.
+6. **Path conventions** — Rust modules under `native/src/`; Python test client
+   under `src/vaultwarden_mcp/`; tests under `tests/`; docs under `docs/`.
+7. **Prefer smallest correct change** — surgical edits over rewrites; no unrelated
+   refactoring while fixing a bug.
+8. **Docs of record** — public behavior lives in `docs/` (Zensical). Do not
+   duplicate; AGENTS.md files point to docs.
 
 ## ⛔ No Patching
 

@@ -2,7 +2,10 @@
 
 ## Overview
 
-A pure-Rust MCP server for Vaultwarden (Bitwarden-compatible password manager) that exposes vault operations as MCP tools. Uses `rmcp` (modelcontextprotocol/rust-sdk) for MCP v3.0 (2026-07-28) compliance and `vaultwarden-cli` for cryptographic operations.
+A pure-Rust MCP server for Vaultwarden (Bitwarden-compatible password manager) that
+exposes vault operations as MCP tools. Uses `rmcp` (modelcontextprotocol/rust-sdk)
+for MCP v3.0 (2026-07-28) compliance and `vaultwarden-cli` for cryptographic
+operations.
 
 ## System Diagram
 
@@ -51,7 +54,8 @@ A pure-Rust MCP server for Vaultwarden (Bitwarden-compatible password manager) t
 ## Security Model
 
 - **No plaintext secrets persisted** — all cipher operations decrypt in-memory only
-- **Credential verification at connect time** — wrong password or credential mismatch caught immediately via HMAC check on symmetric key
+- **Credential verification at connect time** — wrong password or credential
+  mismatch caught immediately via HMAC check on symmetric key
 - **Per-account sessions** — isolated `VaultwardenSession` per identity, multi-account via session pool
 - **Metadata-only in search** — `search` decrypts name + username only; full decrypt requires `get_cipher` by ID
 

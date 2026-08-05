@@ -39,7 +39,16 @@ opencode.json
 # Skills directory (track only DOX markdown files; tools may drop other content here)
 /.agents/*
 !/.agents/*.md
+!/.agents/plans/
+!/.agents/history/
+/.agents/plans/*
 skills-lock.json
 
 # GrepAI config directory
 .grepai/
+
+# rumdl markdown linter cache
+.rumdl_cache/
+
+# Other tool directories
+.codegraph/

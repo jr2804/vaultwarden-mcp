@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## 2026.8.0 (2026-08-05)
 
 ### Added
+
 - Pure Rust MCP server using `rmcp` (modelcontextprotocol/rust-sdk) v3.1.0
 - MCP v3.0 (2026-07-28) protocol compliance
 - 4 MCP tools: `search`, `get_cipher`, `sync`, `list_accounts`
@@ -15,10 +16,12 @@ All notable changes to this project will be documented in this file.
 - Claude Desktop / AI IDE configuration support
 
 ### Changed
+
 - **Breaking**: Complete rewrite from Python/PyO3 to pure Rust
 - **Breaking**: Python MCP server removed (FastMCP retained as test client only)
 - **Breaking**: `pyproject.toml` now serves only the Python test suite
 
 ### Security
+
 - Vault password verified at connect time via HMAC check on symmetric key decryption
 - No plaintext secrets persisted anywhere
