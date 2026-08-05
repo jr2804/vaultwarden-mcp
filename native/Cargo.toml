@@ -1,23 +1,36 @@
 [package]
-name = "vaultwarden_mcp_native"
+name = "vaultwarden-mcp"
 version = "2026.8.0"
 edition = "2024"
 rust-version = "1.88"
-description = "PyO3 bindings for vaultwarden-cli, powering the vaultwarden-mcp MCP server"
+description = "MCP server for Vaultwarden (Bitwarden-compatible password manager) — search, read, and manage vault entries via the Model Context Protocol"
 license = "MIT"
+authors = ["Hermes Agent <openclaw@reimes.ws>"]
 
-[lib]
-name = "vaultwarden_mcp_native"
-crate-type = ["cdylib"]
+[features]
+default = ["http"]
+http = ["rmcp/transport-streamable-http-server", "dep:axum", "dep:tower"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "anyhow"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 vaultwarden-cli = { git = "https://github.com/haydonryan/vaultwarden-cli.git", rev = "96cdd0dfc04d04223ec88f8ab0dd217dc0e9beb8" }
+rmcp = { version = "3", features = ["schemars", "transport-io", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 anyhow = { version = "1", features = ["std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
+schemars = "0.8"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Optional: streamable HTTP transport
+axum = { version = "0.8", optional = true }
+tower = { version = "0.5", optional = true }
 
 [profile.release]
 strip = "symbols"
 codegen-units = 1
+
+[[bin]]
+name = "vaultwarden-mcp"
+path = "src/main.rs"

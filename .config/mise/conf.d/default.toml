@@ -1,3 +1,11 @@
 [tasks.dev]
 description = "Install development dependencies"
 run = "uv sync -U --dev --all-extras --all-groups"
+
+[tasks.server]
+description = "Build the Rust MCP server binary"
+run = "cargo build --manifest-path native/Cargo.toml"
+
+[tasks.server-release]
+description = "Build the Rust MCP server binary in release mode"
+run = "cargo build --release --manifest-path native/Cargo.toml"

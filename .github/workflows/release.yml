@@ -2,82 +2,129 @@ name: Release
 
 on:
   push:
-    branches: [main]
-  release:
-    types: [published]
+    tags: ["2026.*"]  # CalVer version tags trigger releases (e.g. 2026.8.0)
+  workflow_dispatch:
 
-concurrency: release
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
+            artifact_name: vaultwarden-mcp-linux-x86_64
+            binary_name: vaultwarden-mcp
+
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            artifact_name: vaultwarden-mcp-linux-x86_64-musl
+            binary_name: vaultwarden-mcp
+
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
+            artifact_name: vaultwarden-mcp-linux-aarch64
+            binary_name: vaultwarden-mcp
+
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            artifact_name: vaultwarden-mcp-windows-x86_64
+            binary_name: vaultwarden-mcp.exe
+
           - target: aarch64-apple-darwin
-            runner: macos-15
+            runner: macos-latest
+            artifact_name: vaultwarden-mcp-macos-aarch64
+            binary_name: vaultwarden-mcp
+
           - target: x86_64-apple-darwin
             runner: macos-13
-          - target: x86_64-pc-windows-msvc
-            runner: windows-2022
+            artifact_name: vaultwarden-mcp-macos-x86_64
+            binary_name: vaultwarden-mcp
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Setup Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets:
-            - ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: ${{ matrix.runner }}-${{ matrix.target }}-cargo-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.runner }}-${{ matrix.target }}-cargo-
 
-      - name: Install maturin
-        run: uv tool install maturin
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+        working-directory: native
 
-      - name: Build release wheel
-        run: maturin build --interpreter python --release --out ./dist/
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip native/target/${{ matrix.target }}/release/${{ matrix.binary_name }}
 
-      - name: Upload wheel
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.target }}
-          path: dist/*.whl
-          if-no-files-found: error
+          name: ${{ matrix.artifact_name }}
+          path: native/target/${{ matrix.target }}/release/${{ matrix.binary_name }}
 
-  publish:
-    name: Create Release
+  release:
+    name: Create GitHub Release
     needs: build
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: downloaded
+          path: dist/
+          path: artifacts/
 
-      - name: Collect wheels
-        run: |
-          mkdir -p release_artifacts
-          find downloaded -name '*.whl' -exec cp -v {} release_artifacts/ \;
-          ls -la release_artifacts/
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || github.event.release.tag_name }}
-          name: Release ${{ github.ref_name || github.event.release.tag_name }}
-          generate_release_notes: true
-          files: release_artifacts/*.whl
+          name: ${{ github.ref_name }}
+          body: |
+            ## vaultwarden-mcp ${{ github.ref_name }}
+
+            Prebuilt binaries for all platforms. Download the binary for your OS/architecture.
+
+            ### Quick start
+            ```bash
+            # Download and make executable (Linux/macOS)
+            chmod +x vaultwarden-mcp
+
+            # Run as MCP server (stdio transport)
+            export VAULTWARDEN_SERVER=https://your-vault.example.com
+            export VAULTWARDEN_CLIENT_ID="your-client-id"
+            export VAULTWARDEN_CLIENT_SECRET="your-client-secret"
+            export VAULTWARDEN_PASSWORD="your-vault-password"
+
+            ./vaultwarden-mcp serve --transport stdio
+            ```
+          files: |
+            artifacts/vaultwarden-mcp-linux-x86_64/vaultwarden-mcp
+            artifacts/vaultwarden-mcp-linux-x86_64-musl/vaultwarden-mcp
+            artifacts/vaultwarden-mcp-linux-aarch64/vaultwarden-mcp
+            artifacts/vaultwarden-mcp-windows-x86_64/vaultwarden-mcp.exe
+            artifacts/vaultwarden-mcp-macos-aarch64/vaultwarden-mcp
+            artifacts/vaultwarden-mcp-macos-x86_64/vaultwarden-mcp
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

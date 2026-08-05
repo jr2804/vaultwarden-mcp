@@ -1,6 +1,6 @@
 [tasks.test]
-description = "Run tests with coverage"
-run = "uv run pytest --cov=vaultwarden_mcp"
+description = "Run Python tests (FastMCP client for the Rust MCP server)"
+run = "cargo build --manifest-path native/Cargo.toml && uv run pytest --cov=vaultwarden_mcp"
 sources = ["src/**/*.py", "tests/**/*.py"]
 outputs = ["htmlcov/", ".coverage"]
 
