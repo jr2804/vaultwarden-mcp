@@ -36,11 +36,6 @@ jobs:
             artifact_name: vaultwarden-mcp-macos-aarch64
             binary_name: vaultwarden-mcp
 
-          - target: x86_64-apple-darwin
-            runner: macos-13
-            artifact_name: vaultwarden-mcp-macos-x86_64
-            binary_name: vaultwarden-mcp
-
     steps:
       - uses: actions/checkout@v4
 
@@ -118,6 +113,5 @@ jobs:
             artifacts/vaultwarden-mcp-linux-aarch64/vaultwarden-mcp
             artifacts/vaultwarden-mcp-windows-x86_64/vaultwarden-mcp.exe
             artifacts/vaultwarden-mcp-macos-aarch64/vaultwarden-mcp
-            artifacts/vaultwarden-mcp-macos-x86_64/vaultwarden-mcp
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

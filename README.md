@@ -33,10 +33,6 @@ curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaul
 curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-macos-aarch64 \
   -o vaultwarden-mcp && chmod +x vaultwarden-mcp
 
-# macOS (Intel)
-curl -sL https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-macos-x86_64 \
-  -o vaultwarden-mcp && chmod +x vaultwarden-mcp
-
 # Windows (PowerShell)
 Invoke-WebRequest -Uri "https://github.com/jr2804/vaultwarden-mcp/releases/latest/download/vaultwarden-mcp-windows-x86_64.exe" \
   -OutFile vaultwarden-mcp.exe
