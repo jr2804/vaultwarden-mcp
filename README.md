@@ -1,6 +1,6 @@
 # Vaultwarden MCP
 
-MCP server for [Vaultwarden](https://github.com/dani-garcia/vaultwarden) (Bitwarden-compatible password manager) — search, read, and sync vault entries via the Model Context Protocol.
+MCP server for [Vaultwarden](https://github.com/dani-garcia/vaultwarden) — search, read, and sync vault entries via the Model Context Protocol.
 
 **Pure Rust binary** using [modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk) (MCP v3.0, 2026-07-28 spec). Multi-account support. Stdio and Streamable HTTP transports.
 
@@ -38,17 +38,9 @@ Invoke-WebRequest -Uri "https://github.com/jr2804/vaultwarden-mcp/releases/lates
   -OutFile vaultwarden-mcp.exe
 ```
 
-### Build from source
+??? tip "Build from source"
 
-Requires Rust 1.88+.
-
-```bash
-git clone https://github.com/jr2804/vaultwarden-mcp.git
-cd vaultwarden-mcp/native
-cargo build --release
-```
-
-The binary is at `target/release/vaultwarden-mcp`.
+    Requires Rust 1.88+. See the [Build guide](build.md) for instructions.
 
 ## Configuration
 
@@ -83,26 +75,19 @@ export VAULTWARDEN_ACCOUNT_WORK_CLIENT_SECRET="..."
 export VAULTWARDEN_ACCOUNT_WORK_PASSWORD="..."
 ```
 
-### Claude Desktop / AI IDEs
+## MCP Client Setup
 
-Add to your MCP client configuration:
+Use [add-mcp](https://github.com/neon-solutions/add-mcp) to configure vaultwarden-mcp for any MCP-compatible agent:
 
-```json
-{
-  "mcpServers": {
-    "vaultwarden": {
-      "command": "/path/to/vaultwarden-mcp",
-      "args": ["serve", "--transport", "stdio"],
-      "env": {
-        "VAULTWARDEN_SERVER": "https://vault.example.com",
-        "VAULTWARDEN_CLIENT_ID": "...",
-        "VAULTWARDEN_CLIENT_SECRET": "...",
-        "VAULTWARDEN_PASSWORD": "..."
-      }
-    }
-  }
-}
+```bash
+npx add-mcp /path/to/vaultwarden-mcp --args "serve --transport stdio" \
+  --env VAULTWARDEN_SERVER=https://vault.example.com \
+  --env VAULTWARDEN_CLIENT_ID="your-client-id" \
+  --env VAULTWARDEN_CLIENT_SECRET="your-client-secret" \
+  --env VAULTWARDEN_PASSWORD="your-vault-password"
 ```
+
+`add-mcp` supports Claude Code, Codex, Cursor, OpenCode, VS Code, Gemini CLI, and [17 more agents](https://github.com/neon-solutions/add-mcp#supported-agents).
 
 ## MCP Tools
 
@@ -116,7 +101,7 @@ Add to your MCP client configuration:
 ## Usage
 
 ```bash
-# Stdio transport (for MCP clients like Claude Desktop)
+# Stdio transport (for MCP clients)
 vaultwarden-mcp serve --transport stdio
 
 # HTTP transport (Streamable HTTP at /mcp)
@@ -126,23 +111,6 @@ vaultwarden-mcp serve --transport http --host 127.0.0.1 --port 8080
 vaultwarden-mcp --version
 ```
 
-## Architecture
-
-```
-┌──────────────────────────────────────────────┐
-│  Rust binary (single exe, no runtime deps)   │
-│                                               │
-│  vaultwarden-cli     rmcp (MCP SDK v3)       │
-│   (REST API /        ServerHandler            │
-│    PBKDF2 keys)      search, get_cipher,      │
-│                   ──▶ sync, list_accounts     │
-└──────────┬──────────────────┬─────────────────┘
-           │ stdio            │ streamable_http
-     MCP clients        HTTP clients
-```
-
-See [development-documentation/architecture.md](development-documentation/architecture.md) for details.
-
 ## Security
 
 - **No plaintext secrets stored** — all cipher operations decrypt in-memory only
@@ -150,18 +118,12 @@ See [development-documentation/architecture.md](development-documentation/archit
 - **Per-account isolation** — separate sessions per vault identity
 - **No logging of secrets** — tracing limited to operation metadata
 
-## Versioning
+## Documentation
 
-CalVer (`YYYY.MM.N`). Git tags in the format `2026.8.0` trigger automated releases via GitHub Actions.
+- [Architecture](architecture.md) — system design, data flow, layer responsibilities
+- [Build from source](build.md) — compiling the Rust binary
+- [Contributing](contributing.md) — development workflow, PR guidelines
 
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run `cargo check && cargo test` in `native/`
-5. Submit a pull request
