@@ -19,6 +19,10 @@ rust = "1.97"
 ripgrep = "latest"
 "github:peteretelej/tree" = { version = "latest", rename_exe = "tree-cli" }
 
+# github CLI to get latest release of vaultwarden for integration tests
+"github:cli/cli" = "latest"
+
+
 [settings.npm]
 package_manager = "bun"
 

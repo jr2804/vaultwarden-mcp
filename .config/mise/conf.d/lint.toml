@@ -1,6 +1,13 @@
+# clippy --fix auto-fixes safe lints (collapsible if, unused vars, etc.);
+# `--allow-dirty` lets it edit the working tree. It also runs rustfmt on
+# touched files. Re-run `mise run lint` if it leaves a partial state.
+
 [tasks.lint]
-description = "Run linter (ruff)"
-run = 'ruff check src tests --fix --unsafe-fixes'
+description = "Run linters (ruff, cargo clippy --fix)"
+run = [
+	"ruff check src tests --fix --unsafe-fixes",
+	"cargo clippy --manifest-path native/Cargo.toml --all-targets --fix --allow-dirty",
+]
 
 [tasks.typecheck]
 description = "Run type checker (ty)"

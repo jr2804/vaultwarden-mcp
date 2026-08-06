@@ -2,30 +2,17 @@
 
 ## Purpose
 
-Mise task/tooling configuration. All build, lint, format, test, docs, and
-MCP tasks live here as fragments — never in `pyproject.toml` scripts.
-
-## Ownership
-
-- `.config/mise/conf.d/*.toml` — one file per concern:
-  `default`, `lint`, `format`, `quality`, `docs`, `mcp`, `skills`
-- `.config/mise/config.toml` — global mise settings
+Mise task/tooling config fragments in `conf.d/*.toml`: build, lint, format,
+test orchestration for both the Rust server and the Python test client.
 
 ## Local Contracts
 
-- Add tasks in `conf.d/*.toml`, not in `pyproject.toml` `[project.scripts]`.
-- Keep one concern per fragment file.
-
-## Work Guidance
-
-- Follow root [AGENTS.md](../../AGENTS.md) + [.agents/POLICIES.md](../../.agents/POLICIES.md).
-- List tasks with `mise run --list`.
-
-## Verification
-
-```bash
-mise run --list
-```
+- `mise run lint` — ruff (Python) + `cargo clippy --fix` (Rust), both
+  auto-fixing safe lints. Clippy runs with `--all-targets --fix --allow-dirty`
+  (also runs rustfmt on touched files). Remaining unfixable lints fail the task.
+  The 3 pre-existing Rust lints (unused `kdf`, collapsible `if`) are fixed.
+- `mise run format` — `cargo fmt` + `ruff format` + `ruff check --select I --fix`.
+- `mise run test` — Rust Tier 1+2 + Python structural tests (all Docker-free).
 
 ## Child DOX Index
 

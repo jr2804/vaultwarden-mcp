@@ -1,6 +1,7 @@
 [tasks.format]
-description = "Format code (ruff, isort, undersort)"
+description = "Format code (cargo fmt, ruff, isort, undersort)"
 run = [
+	"cargo fmt --manifest-path native/Cargo.toml",
 	"undersort src tests",
 	"ruff format src tests",
 	"ruff check src tests --select I --fix",

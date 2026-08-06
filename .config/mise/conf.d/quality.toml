@@ -1,8 +1,11 @@
 [tasks.test]
-description = "Run Python tests (FastMCP client for the Rust MCP server)"
-run = "cargo build --manifest-path native/Cargo.toml && uv run pytest --cov=vaultwarden_mcp"
-sources = ["src/**/*.py", "tests/**/*.py"]
-outputs = ["htmlcov/", ".coverage"]
+description = "Run Rust tests (Tier 1+2 crypto/integration) and Python structural tests"
+run = [
+  "cargo test --manifest-path native/Cargo.toml",
+  "uv run pytest",
+]
+sources = ["native/src/**/*.rs", "native/tests/**/*.rs", "tests/**/*.py"]
+outputs = [".coverage"]
 
 [tasks.all]
 description = "Run all quality checks"
