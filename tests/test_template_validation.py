@@ -28,17 +28,14 @@ def test_pyproject_toml_structure() -> None:
 
     # Verify no maturin/pyo3 dependencies (server is pure Rust)
     build_deps = content["build-system"]["requires"]
-    assert not any("maturin" in d for d in build_deps), \
-        "Should not use maturin (server is pure Rust binary)"
+    assert not any("maturin" in d for d in build_deps), "Should not use maturin (server is pure Rust binary)"
 
     # Verify dependencies include FastMCP for testing
     deps = content["project"]["dependencies"]
-    assert any("fastmcp" in d.lower() for d in deps), \
-        "FastMCP should be a dependency for test client"
+    assert any("fastmcp" in d.lower() for d in deps), "FastMCP should be a dependency for test client"
 
     # Verify no 'mcp' dependency (we use rmcp in Rust, not Python MCP SDK)
-    assert not any(d.startswith("mcp") for d in deps), \
-        "Should not depend on Python mcp package"
+    assert not any(d.startswith("mcp") for d in deps), "Should not depend on Python mcp package"
 
 
 def test_cargo_toml_uses_rmcp() -> None:
@@ -57,8 +54,9 @@ def test_cargo_toml_uses_rmcp() -> None:
     version = content["package"]["version"]
     parts = version.split(".")
     assert len(parts) == 3, f"Version should be CalVer (YYYY.MM.N), got: {version}"
-    assert len(parts[0]) == 4 and parts[0].startswith("20"), \
-        f"Version year should be 4 digits starting with 20, got: {version}"
+    year = parts[0]
+    assert len(year) == 4, f"Version year should be 4 digits, got: {version}"
+    assert year.startswith("20"), f"Version year should start with '20', got: {version}"
 
 
 def test_pytest_configuration() -> None:
@@ -69,14 +67,13 @@ def test_pytest_configuration() -> None:
 
     pytest_config = content.get("tool", {}).get("pytest", {}).get("ini_options", {})
     assert "testpaths" in pytest_config, "testpaths should be configured"
-    assert "async" in str(pytest_config.get("asyncio_mode", "")).lower(), \
-        "asyncio_mode should be enabled for async tests"
+    mode = str(pytest_config.get("asyncio_mode", "")).lower()
+    assert mode in ("auto", "strict"), f"asyncio_mode should be 'auto' or 'strict' for async tests, got: {mode}"
 
     # Verify coverage threshold
     pytest_cov = content.get("tool", {}).get("pytest-cov", {})
     assert "fail_under" in pytest_cov, "fail_under should be set"
-    assert pytest_cov["fail_under"] == 80, \
-        f"Coverage threshold should be 80%, got: {pytest_cov['fail_under']}"
+    assert pytest_cov["fail_under"] == 80, f"Coverage threshold should be 80%, got: {pytest_cov['fail_under']}"
 
 
 def test_binary_exists_in_release_workflow() -> None:
@@ -86,7 +83,5 @@ def test_binary_exists_in_release_workflow() -> None:
     content = workflow_file.read_text(encoding="utf-8")
 
     # Should use cargo build, not maturin build or uv build
-    assert "cargo build" in content or "cargo release" in content, \
-        "CI should use cargo build for Rust binary"
-    assert "maturin" not in content, \
-        "CI should not use maturin (no Python wheels)"
+    assert "cargo build" in content or "cargo release" in content, "CI should use cargo build for Rust binary"
+    assert "maturin" not in content, "CI should not use maturin (no Python wheels)"
