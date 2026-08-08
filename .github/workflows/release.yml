@@ -92,6 +92,23 @@ jobs:
       - name: List artifacts
         run: find artifacts/ -type f | sort
 
+      - name: Stage binaries with platform-specific names
+        # The artifact dirs share the basename (3x "vaultwarden-mcp", 1x .exe),
+        # so they collide if uploaded directly. Copy each into release/ with a
+        # name matching the artifact dir, matching the 2026.8.0 convention:
+        # vaultwarden-mcp-linux-x86_64, vaultwarden-mcp-macos-aarch64, etc.
+        run: |
+          mkdir -p release
+          for d in artifacts/*/; do
+            name=$(basename "$d")   # e.g. vaultwarden-mcp-linux-x86_64
+            if [ -f "$d/vaultwarden-mcp.exe" ]; then
+              cp "$d/vaultwarden-mcp.exe" "release/$name.exe"
+            elif [ -f "$d/vaultwarden-mcp" ]; then
+              cp "$d/vaultwarden-mcp" "release/$name"
+            fi
+          done
+          ls -la release/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -115,9 +132,9 @@ jobs:
             ./vaultwarden-mcp serve --transport stdio
             ```
           files: |
-            artifacts/vaultwarden-mcp-linux-x86_64/vaultwarden-mcp
-            artifacts/vaultwarden-mcp-linux-aarch64/vaultwarden-mcp
-            artifacts/vaultwarden-mcp-windows-x86_64/vaultwarden-mcp.exe
-            artifacts/vaultwarden-mcp-macos-aarch64/vaultwarden-mcp
+            release/vaultwarden-mcp-linux-x86_64
+            release/vaultwarden-mcp-linux-aarch64
+            release/vaultwarden-mcp-macos-aarch64
+            release/vaultwarden-mcp-windows-x86_64.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
