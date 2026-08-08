@@ -32,12 +32,15 @@ operations.
 | **MCP Server** | `mcp.rs` | `ServerHandler` trait: `list_tools()`, `call_tool()`, `get_info()` |
 | **Vault Client** | `lib.rs` | REST API client (login, sync, search), crypto (key derivation, cipher decrypt) |
 
-### Python (`tests/`) — Testing Only
+### Python (`tests/`) — Structural Validation Only
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| **Test Harness** | `test_mcp_server.py` | FastMCP `StdioTransport` launches Rust binary, black-box tool testing |
-| **Fixtures** | `conftest.py` | Binary builder, environment setup, MCP client session |
+| **Structural tests** | `test_template_validation.py` | pyproject.toml, Cargo.toml, CI shape (no maturin, CalVer) |
+
+> Runtime behavior (crypto + session + MCP tool calls) is tested in Rust —
+> see `native/tests/` (Tier 1: offline crypto round-trip; Tier 2: wiremock
+> integration). Both tiers are Docker-free and network-free.
 
 ## Data Flow
 

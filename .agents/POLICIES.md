@@ -32,8 +32,8 @@ Always applicable. Boundaries, priorities, verification, checklist.
   (`native/Cargo.toml` for Rust, `pyproject.toml` for Python).
 - No unrelated refactoring while fixing a bug.
 - Update only directly affected tests.
-- Production changes in Rust ([native/src/](../native/src/)); Python edits
-  under [src/vaultwarden_mcp/](../src/vaultwarden_mcp/) are test-client only.
+- Production changes in Rust ([native/src/](../native/src/)); Python edits are
+  scripting/tooling only (tests, docs) — never production logic.
 
 ## Code quality
 
@@ -120,16 +120,15 @@ Run the narrowest relevant checks for the changed surface. Full task list:
 [`.config/mise/conf.d/quality.toml`](../.config/mise/conf.d/quality.toml).
 
 ```bash
-# Rust (production)
+# Rust (production) — also via `mise run lint`
 cargo check --manifest-path native/Cargo.toml
-cargo clippy --manifest-path native/Cargo.toml -- -D warnings
+cargo clippy --manifest-path native/Cargo.toml --all-targets --fix --allow-dirty
 cargo test  --manifest-path native/Cargo.toml
 
-# Python (test client + lint)
-uv run ruff check .
-uv run ruff format --check .
-uv run ty check src tests
-uv run pytest --cov
+# Python (structural checks + lint) — also via `mise run lint`
+uv run ruff check tests
+uv run ruff format --check tests
+uv run pytest
 
 # Docs
 uv run zensical build --strict

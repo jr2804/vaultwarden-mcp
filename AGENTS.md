@@ -97,10 +97,9 @@ When the user requests a durable behavior change, record it here or in the relev
 | Path                            | Owns                                                                            | Read when                                       |
 | ------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------- |
 | `native/AGENTS.md`              | Rust MCP server: `rmcp` handlers, `vaultwarden-cli` crypto, transport selection | Touching `native/src/**` or building the binary |
-| `tests/AGENTS.md`               | Black-box MCP testing via FastMCP stdio/HTTP client, fixtures, conftest         | Touching `tests/**` or running the test suite   |
+| `tests/AGENTS.md`               | Python structural checks (pyproject/Cargo/CI shape)                       | Touching `tests/**` or running the test suite   |
 | `docs/AGENTS.md`                | User-facing docs (Zensical), build, architecture, contributing                  | Touching `docs/**` or `zensical.toml`           |
 | `.config/mise/AGENTS.md`        | Mise task/tooling config fragments (`conf.d/*.toml`)                            | Touching `.config/mise/**`                      |
-| `src/vaultwarden_mcp/AGENTS.md` | Python test client package (`fastmcp` glue)                                     | Touching `src/vaultwarden_mcp/**`               |
 | `plans/`                        | Working on a feature                                                            | Implementation plans (gitignored)               |
 | `history/`                      | Background (overflow)                                                           | Archived decisions and completed plans          |
 
@@ -129,8 +128,8 @@ When the user requests a durable behavior change, record it here or in the relev
 
 _Always-injected_ — keep minimal. Everything else → `.agents/` files.
 
-1. **Production code is Rust** — `native/src/`. The Python package under
-   `src/vaultwarden_mcp/` is the **test client only**, not production.
+1. **Production code is Rust** — `native/src/`. Python is a scripting
+   environment only (tests, docs tooling) — no Python package.
 2. **MCP spec version** is pinned to **2026-07-28 (v3.0)** via `rmcp` v3.1. Do not
    bump without a recorded decision in `.agents/HISTORY.md`.
 3. **No plaintext secrets in code or tests** — credentials come from
@@ -139,8 +138,8 @@ _Always-injected_ — keep minimal. Everything else → `.agents/` files.
    live in `.config/mise/conf.d/*.toml`. Add tasks there, not in `pyproject.toml` scripts.
 5. **No temp files in repo root** — use `.tmp/` (already gitignored). Never commit
    `*.so`, `*.dll`, `target/`, `.venv/`.
-6. **Path conventions** — Rust modules under `native/src/`; Python test client
-   under `src/vaultwarden_mcp/`; tests under `tests/`; docs under `docs/`.
+6. **Path conventions** — Rust modules under `native/src/`; Rust tests under
+   `native/tests/`; Python structural checks under `tests/`; docs under `docs/`.
 7. **Prefer smallest correct change** — surgical edits over rewrites; no unrelated
    refactoring while fixing a bug.
 8. **Docs of record** — public behavior lives in `docs/` (Zensical). Do not

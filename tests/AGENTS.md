@@ -2,15 +2,14 @@
 
 ## Purpose
 
-Black-box MCP testing. Two layers:
+Python structural checks — assert the project layout and config shape
+(pyproject.toml, Cargo.toml, CI workflow) are correct. Pure file assertions,
+no binary, no vault, no network.
 
-- **Python** (`tests/`) — FastMCP client drives the Rust binary over stdio,
-  asserts MCP protocol/tool behavior. Requires a live vault (credentials via
-  `VAULTWARDEN_*` env vars); cannot run without one.
-- **Rust** (`native/tests/`) — Docker-free, network-free crypto + integration
-  tests. See [native/AGENTS.md](../native/AGENTS.md) for Tier 1 (offline crypto
-  round-trip) and Tier 2 (wiremock end-to-end). Run with
-  `cargo test --manifest-path native/Cargo.toml`.
+The runtime behavior of the MCP server is tested in Rust — see
+[native/AGENTS.md](../native/AGENTS.md) for Tier 1 (offline crypto round-trip)
+and Tier 2 (wiremock integration), run with
+`cargo test --manifest-path native/Cargo.toml`.
 
 ## Ownership
 
@@ -27,12 +26,12 @@ Black-box MCP testing. Two layers:
 ## Work Guidance
 
 - Follow root [AGENTS.md](../AGENTS.md) + [.agents/POLICIES.md](../.agents/POLICIES.md).
-- Run via `uv run pytest` (mise task `quality`).
+- Run via `uv run pytest` (mise task `test`).
 
 ## Verification
 
 ```bash
-uv run pytest --cov
+uv run pytest
 ```
 
 ## Child DOX Index

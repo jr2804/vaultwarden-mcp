@@ -52,3 +52,5 @@ skills-lock.json
 
 # Other tool directories
 .codegraph/
+
+site/

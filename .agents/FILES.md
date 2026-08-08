@@ -21,10 +21,9 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | **Bundled config file (example)** | [`vaultwarden-mcp.toml.example`](../vaultwarden-mcp.toml.example) | Annotated sample config file |
 | **secretspec manifest (scaffold)** | [`secretspec.toml`](../secretspec.toml) | Secret declarations for the upcoming secretspec integration |
 | **Config SPEC** | [`.agents/plans/01-config.md`](../.agents/plans/01-config.md) | Design contract for the TOML config + secretspec feature |
-| **Python test client** | [`src/vaultwarden_mcp/__init__.py`](../src/vaultwarden_mcp/__init__.py) | FastMCP client glue |
-| **Python metadata** | [`src/vaultwarden_mcp/__about__.py`](../src/vaultwarden_mcp/__about__.py) | `__version__` |
-| **Test fixtures** | [`tests/conftest.py`](../tests/conftest.py) | Binary builder, env setup, MCP session |
-| **Black-box tests** | [`tests/test_mcp_server.py`](../tests/test_mcp_server.py) | Tool call assertions |
+| **Python metadata** | [`pyproject.toml`](../pyproject.toml) | `name`, `version`, pytest config, ruff config |
+| **Structural tests** | [`tests/test_template_validation.py`](../tests/test_template_validation.py) | pyproject.toml, Cargo.toml, CI shape checks |
+| **Rust tests (Tier 1+2)** | [`native/tests/`](../native/tests/) | Offline crypto round-trip + wiremock integration (Docker-free) |
 | **Package metadata** | [`pyproject.toml`](../pyproject.toml) | `name`, `version`, pytest config |
 | **Lint config** | [`ruff.toml`](../ruff.toml), [`ty.toml`](../ty.toml) | line length, target Python |
 | **Tooling tasks** | [`.config/mise/conf.d/*.toml`](../.config/mise/) | `default`, `lint`, `format`, `quality`, `docs`, `mcp`, `skills` |
@@ -51,8 +50,8 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | Path | Role |
 | ------ | ------ |
 | `native/src/` | Rust production modules |
-| `src/vaultwarden_mcp/` | Python test-client package only |
-| `tests/` | pytest suite (black-box via FastMCP) |
+| `native/tests/` | Rust tests (Tier 1 crypto round-trip, Tier 2 wiremock) |
+| `tests/` | pytest structural checks (pyproject/Cargo/CI shape) |
 | `docs/` | Zensical-rendered user docs |
 | `.config/mise/conf.d/` | Mise task fragments (one file per concern) |
 | `.agents/` | DOX markdown (5 tracked files — see [.gitignore](../.gitignore) override) |

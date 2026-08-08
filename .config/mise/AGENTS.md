@@ -3,7 +3,7 @@
 ## Purpose
 
 Mise task/tooling config fragments in `conf.d/*.toml`: build, lint, format,
-test orchestration for both the Rust server and the Python test client.
+test orchestration for both the Rust server and the Python scripting env.
 
 ## Local Contracts
 

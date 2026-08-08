@@ -16,14 +16,16 @@ binary exposing `search`, `get_cipher`, `sync`, `list_accounts` over MCP v3.0
 # Build (Rust binary — production) — also via `mise run server-release`
 cargo build --release --manifest-path native/Cargo.toml
 
-# Build (Python test client)
-uv sync
+# Python scripting env (pytest structural checks, ruff, zensical docs)
+uv sync --extra dev
 
-# Test (black-box via FastMCP client → Rust binary)
-uv run pytest
+# Test — Docker-free, no live server needed
+cargo test --manifest-path native/Cargo.toml   # Rust unit + crypto + wiremock tiers
+uv run pytest                                   # Python structural checks
 
 # Lint / format
-uv run ruff check . && uv run ruff format .
+mise run lint
+mise run format
 
 # Docs
 uv run zensical serve    # http://localhost:8000
@@ -79,10 +81,9 @@ vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
 - [.agents/HISTORY.md](HISTORY.md) — past decisions and rationale
 - Subtree AGENTS.md files — local contracts for each area:
   - [native/AGENTS.md](../native/AGENTS.md) — Rust MCP server
-  - [tests/AGENTS.md](../tests/AGENTS.md) — black-box test client
+  - [tests/AGENTS.md](../tests/AGENTS.md) — Python structural checks
   - [docs/AGENTS.md](../docs/AGENTS.md) — docs build & content
   - [.config/mise/AGENTS.md](../.config/mise/AGENTS.md) — mise tasks
-  - [src/vaultwarden_mcp/AGENTS.md](../src/vaultwarden_mcp/AGENTS.md) — Python glue
 
 ## Available tools
 

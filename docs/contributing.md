@@ -11,27 +11,30 @@ cd native
 cargo build
 ```
 
-4. **Run tests:**
+4. **Run tests** — the test suite is Docker-free and needs no live Vaultwarden
+   server:
 
 ```bash
-cargo test          # Rust unit tests (in native/)
-uv sync --dev       # install Python test dependencies
-uv run pytest       # black-box MCP tests via FastMCP
+cargo test          # Rust tests: unit + Tier 1 crypto round-trip + Tier 2 wiremock integration (native/)
+uv sync --extra dev # install Python scripting env (pytest, ruff, zensical)
+uv run pytest       # Python structural checks (tests/test_template_validation.py)
 ```
 
 ## Project Structure
 
 ```text
 vaultwarden-mcp/
-├── native/                     # Rust MCP server
+├── native/                     # Rust MCP server (production)
 │   ├── src/
 │   │   ├── main.rs             # CLI entrypoint (clap)
 │   │   ├── mcp.rs              # ServerHandler implementation
+│   │   ├── config.rs           # TOML config + env-var merge
 │   │   └── lib.rs              # Vaultwarden client + crypto
+│   ├── tests/                  # Rust tests (Tier 1: crypto, Tier 2: wiremock)
 │   └── Cargo.toml
-├── tests/                      # Python black-box tests (FastMCP)
+├── tests/                      # Python structural checks (pyproject/Cargo/CI shape)
 ├── docs/                       # Documentation (Zensical)
-├── src/vaultwarden_mcp/        # Python test helpers
+├── .config/mise/               # Mise tasks (build, lint, format, test, docs)
 └── zensical.toml               # Docs config
 ```
 
@@ -47,6 +50,11 @@ vaultwarden-mcp/
 
 - **Rust**: Follow `cargo fmt` and `cargo clippy` conventions
 - **Python**: Follow `ruff` formatting (line-length 88, target Python 3.13)
+
+## Mise tasks
+
+All build/lint/format/test tasks live in `.config/mise/conf.d/`. Run
+`mise run --list` to see them; `mise run all` runs the full quality gate.
 
 ## Versioning
 
