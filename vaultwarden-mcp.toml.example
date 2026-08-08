@@ -1,0 +1,40 @@
+# vaultwarden-mcp — example config file
+#
+# Copy to vaultwarden-mcp.toml (next to the binary or in ~/.config/vaultwarden-mcp/)
+# and edit. Discover lookup chain:
+#   1. --config <path> CLI flag
+#   2. ./vaultwarden-mcp.toml
+#   3. ~/.config/vaultwarden-mcp/config.toml
+#
+# Any field can be a literal string or a `secret://provider/key` URI resolved
+# via secretspec. Env vars win per-field: VAULTWARDEN_ACCOUNT_<LABEL>_<FIELD>
+# (or VAULTWARDEN_<FIELD> for single-account) overrides what is here.
+
+[server]
+# Default transport applied to all accounts (overridable via CLI --transport).
+default_transport = "stdio"
+# Allow http:// servers (development only). Override per-account below.
+allow_http = false
+
+# One account per [[accounts]] entry. Add as many as you need.
+[[accounts]]
+label = "personal"
+server = "https://vault.personal.example.com"
+client_id = "user.personal"
+# Plaintext (works today, but be careful with file permissions):
+client_secret = "literal-secret"
+password = "literal-password"
+# OR secretspec reference (parsed today; secretspec runtime resolution is
+# the planned follow-up — see .agents/plans/01-config.md and secretspec.toml):
+# client_secret = "secret://VAULTWARDEN_CLIENT_SECRET"
+# password = "secret://VAULTWARDEN_PASSWORD"
+allow_http = false  # optional per-account override
+
+[[accounts]]
+label = "work"
+server = "https://vault.work.example.com"
+client_id = "user.work"
+client_secret = "literal-secret"
+password = "literal-password"
+# client_secret = "secret://VAULTWARDEN_CLIENT_SECRET"
+# password = "secret://VAULTWARDEN_PASSWORD"

@@ -6,14 +6,15 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use vaultwarden_cli::models::{
+    Cipher, CipherData, FieldType, KdfType, SyncResponse, TokenResponse,
+};
 use vaultwarden_cli::{
     api::ApiClient,
     crypto::{CryptoKeys, KdfIterations, MasterKey},
 };
-use vaultwarden_cli::models::{
-    Cipher, CipherData, FieldType, KdfType, SyncResponse, TokenResponse,
-};
 
+pub mod config;
 pub mod mcp;
 
 /// A connected vaultwarden session with decrypted cipher access.
@@ -68,22 +69,23 @@ impl VaultwardenSession {
         allow_http: bool,
     ) -> Result<Self> {
         let api = Arc::new(
-            ApiClient::new_with_flags(server, allow_http)
-                .context("failed to create API client")?
+            ApiClient::new_with_flags(server, allow_http).context("failed to create API client")?,
         );
         let server_url = server.to_string();
 
         // 1. Authenticate
-        let token: TokenResponse = api.login(client_id, client_secret)
+        let token: TokenResponse = api
+            .login(client_id, client_secret)
             .await
             .context("failed to authenticate (client_credentials) with vaultwarden")?;
 
         let access_token = token.access_token.clone();
-        let kdf = token.kdf.unwrap_or(KdfType::Pbkdf2);
+        let _kdf = token.kdf.unwrap_or(KdfType::Pbkdf2);
         let kdf_iterations = token.kdf_iterations.unwrap_or(600_000);
 
         // 2. Sync to fetch vault data
-        let sync: SyncResponse = api.sync(&access_token)
+        let sync: SyncResponse = api
+            .sync(&access_token)
             .await
             .context("failed to sync vault — credential verification step")?;
 
@@ -91,22 +93,29 @@ impl VaultwardenSession {
 
         // 3. Derive master key from password + email + kdf iterations
         let master_key = MasterKey::derive(
-            password, &email,
+            password,
+            &email,
             KdfIterations::new(kdf_iterations)
                 .ok_or_else(|| anyhow::anyhow!("invalid KDF iterations: {}", kdf_iterations))?,
         );
 
         // 4. Decrypt encrypted symmetric key (verifies password — HMAC check)
-        let encrypted_key = sync.profile.key.as_deref()
+        let encrypted_key = sync
+            .profile
+            .key
+            .as_deref()
             .ok_or_else(|| anyhow::anyhow!("no encrypted key in profile"))?;
-        let crypto_keys = master_key.decrypt_symmetric_key(encrypted_key)
-            .context("failed to decrypt symmetric key — vault password is wrong (HMAC verification)")?;
+        let crypto_keys = master_key.decrypt_symmetric_key(encrypted_key).context(
+            "failed to decrypt symmetric key — vault password is wrong (HMAC verification)",
+        )?;
 
         // 5. Verify by attempting to decrypt ciphers
         let entries = Self::decrypt_ciphers(&sync.ciphers, &crypto_keys);
         tracing::info!(
             "vault verification OK: {}@{} ({} ciphers decrypted)",
-            email, server_url, entries.len()
+            email,
+            server_url,
+            entries.len()
         );
 
         Ok(Self {
@@ -120,84 +129,105 @@ impl VaultwardenSession {
     }
 
     /// Decrypt all ciphers from a sync response.
-    fn decrypt_ciphers(ciphers: &[Cipher], keys: &CryptoKeys) -> Vec<CipherEntry> {
-        ciphers.iter()
+    ///
+    /// Public so integration tests can exercise the decrypt path against
+    /// fixture `Cipher` values without a live server.
+    pub fn decrypt_ciphers(ciphers: &[Cipher], keys: &CryptoKeys) -> Vec<CipherEntry> {
+        ciphers
+            .iter()
             .filter(|c| c.deleted_date.is_none())
             .filter_map(|c| {
-                c.cipher_data.as_ref().map(|d| Self::cipher_to_entry(c, d, keys))
+                c.cipher_data
+                    .as_ref()
+                    .map(|d| Self::cipher_to_entry(c, d, keys))
             })
             .collect()
     }
 
-    fn cipher_to_entry(cipher: &Cipher, data: &CipherData, keys: &CryptoKeys) -> CipherEntry {
-        // Determine cipher type string and name
-        let (cipher_type_str, cipher_name) = match data {
-            CipherData::Login(l) => {
-                ("login", cipher.name.clone()
-                    .or_else(|| l.username.clone())
-                    .unwrap_or_else(|| cipher.id.to_string()))
-            }
-            CipherData::SecureNote(_) => {
-                ("note", cipher.name.clone().unwrap_or_else(|| cipher.id.to_string()))
-            }
-            CipherData::Card(card) => {
-                ("card", cipher.name.clone()
-                    .or_else(|| card.cardholder_name.clone())
-                    .unwrap_or_else(|| cipher.id.to_string()))
-            }
-            CipherData::Identity(identity) => {
-                ("identity", cipher.name.clone()
-                    .or(identity.company.clone())
-                    .or(identity.email.clone())
-                    .unwrap_or_else(|| cipher.id.to_string()))
-            }
-            CipherData::SshKey(_) => {
-                ("ssh", cipher.name.clone().unwrap_or_else(|| cipher.id.to_string()))
-            }
+    /// Decrypt a single cipher into a [`CipherEntry`].
+    ///
+    /// Public for the same reason as [`decrypt_ciphers`](Self::decrypt_ciphers).
+    pub fn cipher_to_entry(cipher: &Cipher, data: &CipherData, keys: &CryptoKeys) -> CipherEntry {
+        // The top-level cipher name is encrypted — decrypt it. Fall back to the
+        // cipher id if absent or undecryptable (never expose raw ciphertext).
+        let cipher_name = cipher
+            .name
+            .as_deref()
+            .and_then(|n| decrypt_str(keys, n))
+            .unwrap_or_else(|| cipher.id.to_string());
+
+        // Determine cipher type string
+        let cipher_type_str = match data {
+            CipherData::Login(_) => "login",
+            CipherData::SecureNote(_) => "note",
+            CipherData::Card(_) => "card",
+            CipherData::Identity(_) => "identity",
+            CipherData::SshKey(_) => "ssh",
         };
 
         // Extract fields based on cipher data type
         let (username, password, uri, notes, totp, ssh_pub, ssh_priv, ssh_fp) = match data {
             CipherData::Login(login) => {
-                let uri_opt = login.uris.as_ref()
+                let uri_opt = login
+                    .uris
+                    .as_ref()
                     .and_then(|u| u.first())
-                    .and_then(|u| u.uri.clone())
-                    .or_else(|| Self::decrypt_str_opt(cipher.data.as_ref(), keys, |d| d.uri.as_deref()));
+                    .and_then(|u| u.uri.as_deref())
+                    .and_then(|enc| decrypt_str(keys, enc))
+                    .or_else(|| {
+                        Self::decrypt_str_opt(cipher.data.as_ref(), keys, |d| d.uri.as_deref())
+                    });
                 (
                     Self::decrypt_str_opt(Some(login), keys, |l| l.username.as_deref()),
                     Self::decrypt_str_opt(Some(login), keys, |l| l.password.as_deref()),
                     uri_opt,
                     Self::decrypt_str_opt(Some(cipher), keys, |c| c.notes.as_deref()),
                     login.totp.clone(),
-                    None, None, None,
+                    None,
+                    None,
+                    None,
                 )
             }
-            CipherData::SshKey(ssh) => {
-                (None, None, None,
-                 Self::decrypt_str_opt(Some(cipher), keys, |c| c.notes.as_deref()),
-                 None, ssh.public_key.clone(), ssh.private_key.clone(), ssh.fingerprint.clone())
-            }
-            _ => {
-                (None, None, None,
-                 Self::decrypt_str_opt(Some(cipher), keys, |c| c.notes.as_deref()),
-                 None, None, None, None)
-            }
+            CipherData::SshKey(ssh) => (
+                None,
+                None,
+                None,
+                Self::decrypt_str_opt(Some(cipher), keys, |c| c.notes.as_deref()),
+                None,
+                ssh.public_key.clone(),
+                ssh.private_key.clone(),
+                ssh.fingerprint.clone(),
+            ),
+            _ => (
+                None,
+                None,
+                None,
+                Self::decrypt_str_opt(Some(cipher), keys, |c| c.notes.as_deref()),
+                None,
+                None,
+                None,
+                None,
+            ),
         };
 
         // Fields
-        let fields = cipher.get_fields()
-            .map(|fs| fs.iter().filter_map(|f| {
-                Some(FieldEntry {
-                    name: f.name.clone()?,
-                    value: Self::decrypt_str_opt_inner(keys, f.value.as_deref()),
-                    field_type: match f.r#type {
-                        FieldType::Text => "text",
-                        FieldType::Hidden => "hidden",
-                        FieldType::Boolean => "boolean",
-                        FieldType::Linked => "linked",
-                    }.to_string(),
+        let fields = cipher.get_fields().map(|fs| {
+            fs.iter()
+                .filter_map(|f| {
+                    Some(FieldEntry {
+                        name: f.name.clone()?,
+                        value: Self::decrypt_str_opt_inner(keys, f.value.as_deref()),
+                        field_type: match f.r#type {
+                            FieldType::Text => "text",
+                            FieldType::Hidden => "hidden",
+                            FieldType::Boolean => "boolean",
+                            FieldType::Linked => "linked",
+                        }
+                        .to_string(),
+                    })
                 })
-            }).collect());
+                .collect()
+        });
 
         CipherEntry {
             id: cipher.id.to_string(),
@@ -248,11 +278,20 @@ impl VaultwardenSession {
     pub async fn search(&self, query: &str) -> Result<Vec<CipherEntry>> {
         let lower = query.to_lowercase();
         let ciphers = self.ciphers.read().await;
-        Ok(ciphers.iter()
+        Ok(ciphers
+            .iter()
             .filter(|c| {
                 c.name.to_lowercase().contains(&lower)
-                    || c.uri.as_deref().unwrap_or("").to_lowercase().contains(&lower)
-                    || c.username.as_deref().unwrap_or("").to_lowercase().contains(&lower)
+                    || c.uri
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&lower)
+                    || c.username
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&lower)
             })
             .cloned()
             .collect())
@@ -261,7 +300,8 @@ impl VaultwardenSession {
     /// Get a specific cipher by ID
     pub async fn get_cipher(&self, id: &str) -> Result<CipherEntry> {
         let ciphers = self.ciphers.read().await;
-        ciphers.iter()
+        ciphers
+            .iter()
             .find(|c| c.id == id)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("cipher '{}' not found", id))
@@ -269,7 +309,9 @@ impl VaultwardenSession {
 
     /// Synchronize the vault and return a summary with decrypted ciphers
     pub async fn sync(&self) -> Result<SyncSummary> {
-        let sync_resp: SyncResponse = self.api.sync(&self.access_token)
+        let sync_resp: SyncResponse = self
+            .api
+            .sync(&self.access_token)
             .await
             .context("failed to sync vault")?;
         let entries = Self::decrypt_ciphers(&sync_resp.ciphers, &self.crypto_keys);
@@ -281,6 +323,10 @@ impl VaultwardenSession {
         })
     }
 
-    pub fn server_url(&self) -> &str { &self.server_url }
-    pub fn email(&self) -> &str { &self.email }
+    pub fn server_url(&self) -> &str {
+        &self.server_url
+    }
+    pub fn email(&self) -> &str {
+        &self.email
+    }
 }

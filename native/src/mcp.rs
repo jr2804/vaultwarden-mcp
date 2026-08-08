@@ -6,12 +6,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use rmcp::{
-    ErrorData as McpError,
-    model::*,
-    service::RequestContext,
-    RoleServer, ServerHandler,
-};
+use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -66,8 +61,11 @@ impl VaultwardenMcpServer {
         let mut sessions = Vec::with_capacity(configs.len());
         for config in configs {
             let session = VaultwardenSession::new(
-                &config.server, &config.client_id, &config.client_secret,
-                &config.password, config.allow_http,
+                &config.server,
+                &config.client_id,
+                &config.client_secret,
+                &config.password,
+                config.allow_http,
             )
             .await
             .map_err(|e| {
@@ -151,37 +149,49 @@ impl ServerHandler for VaultwardenMcpServer {
                 let guard = self.sessions.lock().await;
                 let mut results = Vec::new();
                 for (label, session) in guard.iter() {
-                    if let Some(ref a) = params.account {
-                        if a != label { continue; }
+                    if let Some(ref a) = params.account
+                        && a != label
+                    {
+                        continue;
                     }
-                    let entries = session.search(&params.query).await
+                    let entries = session
+                        .search(&params.query)
+                        .await
                         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                     for entry in entries {
-                        results.push(serde_json::to_value(entry.clone())
-                            .unwrap_or(serde_json::json!({"id": entry.id, "error": "serialization failed"})));
+                        results.push(serde_json::to_value(entry.clone()).unwrap_or(
+                            serde_json::json!({"id": entry.id, "error": "serialization failed"}),
+                        ));
                     }
                 }
                 drop(guard);
                 Ok(CallToolResult::success(vec![ContentBlock::text(
-                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".into())
-                )]).into())
+                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".into()),
+                )])
+                .into())
             }
 
             "get_cipher" => {
                 let params: GetCipherParams = serde_json::from_value(args_value)
                     .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
                 let guard = self.sessions.lock().await;
-                let session = guard.iter().find(|(l, _)| l == &params.account)
+                let session = guard
+                    .iter()
+                    .find(|(l, _)| l == &params.account)
                     .ok_or_else(|| {
                         let msg = format!("account '{}' not found", params.account);
                         McpError::invalid_params(msg, None)
                     })?;
-                let entry = session.1.get_cipher(&params.cipher_id).await
+                let entry = session
+                    .1
+                    .get_cipher(&params.cipher_id)
+                    .await
                     .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
                 drop(guard);
                 Ok(CallToolResult::success(vec![ContentBlock::text(
-                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into())
-                )]).into())
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
             }
 
             "sync" => {
@@ -190,10 +200,14 @@ impl ServerHandler for VaultwardenMcpServer {
                 let guard = self.sessions.lock().await;
                 let mut summaries = Vec::new();
                 for (label, session) in guard.iter() {
-                    if let Some(ref a) = params.account {
-                        if a != label { continue; }
+                    if let Some(ref a) = params.account
+                        && a != label
+                    {
+                        continue;
                     }
-                    let summary = session.sync().await
+                    let summary = session
+                        .sync()
+                        .await
                         .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                     summaries.push(serde_json::json!({
                         "account": label,
@@ -203,23 +217,28 @@ impl ServerHandler for VaultwardenMcpServer {
                 }
                 drop(guard);
                 Ok(CallToolResult::success(vec![ContentBlock::text(
-                    serde_json::to_string_pretty(&summaries).unwrap_or_else(|_| "[]".into())
-                )]).into())
+                    serde_json::to_string_pretty(&summaries).unwrap_or_else(|_| "[]".into()),
+                )])
+                .into())
             }
 
             "list_accounts" => {
                 let guard = self.sessions.lock().await;
-                let accounts: Vec<Value> = guard.iter().map(|(label, session)| {
-                    serde_json::json!({
-                        "label": label,
-                        "server": session.server_url(),
-                        "email": session.email(),
+                let accounts: Vec<Value> = guard
+                    .iter()
+                    .map(|(label, session)| {
+                        serde_json::json!({
+                            "label": label,
+                            "server": session.server_url(),
+                            "email": session.email(),
+                        })
                     })
-                }).collect();
+                    .collect();
                 drop(guard);
                 Ok(CallToolResult::success(vec![ContentBlock::text(
-                    serde_json::to_string_pretty(&accounts).unwrap_or_else(|_| "[]".into())
-                )]).into())
+                    serde_json::to_string_pretty(&accounts).unwrap_or_else(|_| "[]".into()),
+                )])
+                .into())
             }
 
             name => {

@@ -23,9 +23,25 @@ clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Config file support (SPEC: .agents/plans/01-config.md)
+# secretspec integration is scaffolded; the crate is not yet wired because the
+# 0.2.x → 0.18.x line is mid-migration and the public surface is unstable.
+# See doc comments in config.rs for the planned hookup.
+toml = "0.8"
+
 # Optional: streamable HTTP transport
 axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
+
+[dev-dependencies]
+# Crypto fixture builder for integration tests — mirrors vaultwarden-cli's
+# internal test_helpers::encrypt_bytes_for_test (AES-256-CBC + HMAC-SHA256).
+aes = "0.9"
+cbc = "0.2"
+hmac = "0.13"
+sha2 = "0.11"
+base64 = "0.23"
+wiremock = "0.6"
 
 [profile.release]
 strip = "symbols"
