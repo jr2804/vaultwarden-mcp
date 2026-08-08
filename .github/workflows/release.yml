@@ -5,6 +5,12 @@ on:
     tags: ["2026.*"]  # CalVer version tags trigger releases (e.g. 2026.8.0)
   workflow_dispatch:
 
+# Required to create the GitHub release and upload binaries. Without this,
+# the default GITHUB_TOKEN is read-only and the release step fails with
+# "Resource not accessible by integration" (403).
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
