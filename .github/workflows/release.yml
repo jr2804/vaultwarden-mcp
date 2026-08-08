@@ -72,14 +72,23 @@ jobs:
         working-directory: native
 
       # Verify Linux binaries are fully static (no glibc runtime dependency).
-      # musl + crt-static produces "not a dynamic executable". This guard fails
-      # the build early if a transitive C dep silently re-introduces dynamic linking.
+      # musl + crt-static makes ldd print "statically linked" / "not a dynamic
+      # executable". This guard fails the build early if a transitive C dep
+      # silently re-introduces dynamic linking (ldd lists a .so).
       - name: Verify static link (Linux)
         if: runner.os == 'Linux'
         run: |
-          ldd native/target/${{ matrix.target }}/release/${{ matrix.binary_name }} \
-            && { echo "ERROR: binary is dynamically linked"; exit 1; } \
-            || echo "OK: fully static binary"
+          set -e
+          BIN="native/target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
+          OUT="$(ldd "$BIN" 2>&1 || true)"
+          echo "$OUT"
+          case "$OUT" in
+            *"not a dynamic executable"*|*"statically linked"*)
+              echo "OK: fully static binary" ;;
+            *)
+              echo "ERROR: binary is dynamically linked (expected static)"
+              exit 1 ;;
+          esac
 
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
