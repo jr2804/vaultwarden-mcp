@@ -2,11 +2,11 @@
 description = "Format code (cargo fmt, ruff, isort, undersort)"
 run = [
 	"cargo fmt --manifest-path native/Cargo.toml",
-	"undersort src tests",
-	"ruff format src tests",
-	"ruff check src tests --select I --fix",
+	"undersort tests",
+	"ruff format tests",
+	"ruff check tests --select I --fix",
 ]
 
 [tasks.format-md]
 description = "Lint and reformat Markdown files with rumdl"
-run = "rumdl fmt --config .config/rumdl.toml src/ docs/ tests/ ./"
+run = "rumdl fmt --config .config/rumdl.toml docs/ tests/ ./"
