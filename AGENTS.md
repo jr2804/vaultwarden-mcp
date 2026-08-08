@@ -100,6 +100,7 @@ When the user requests a durable behavior change, record it here or in the relev
 | `tests/AGENTS.md`               | Python structural checks (pyproject/Cargo/CI shape)                       | Touching `tests/**` or running the test suite   |
 | `docs/AGENTS.md`                | User-facing docs (Zensical), build, architecture, contributing                  | Touching `docs/**` or `zensical.toml`           |
 | `.config/mise/AGENTS.md`        | Mise task/tooling config fragments (`conf.d/*.toml`)                            | Touching `.config/mise/**`                      |
+| `skills/AGENTS.md`             | Repo-bundled agent skills (usage instructions for project tools)                | Touching `skills/**` or adding/using a skill    |
 | `plans/`                        | Working on a feature                                                            | Implementation plans (gitignored)               |
 | `history/`                      | Background (overflow)                                                           | Archived decisions and completed plans          |
 

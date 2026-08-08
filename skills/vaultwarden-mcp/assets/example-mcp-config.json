@@ -1,0 +1,54 @@
+{
+  "_comment": "Example MCP client config for a two-account vaultwarden-mcp setup. Copy this into your MCP host's config (e.g. Claude Desktop's claude_desktop_config.json under mcpServers.vaultwarden). The two accounts (human + agent) each resolve their secrets via secretspec using env vars.",
+  "mcpServers": {
+    "vaultwarden": {
+      "command": "/path/to/vaultwarden-mcp",
+      "args": [
+        "serve",
+        "--transport", "stdio",
+        "--config", "/path/to/vaultwarden-mcp.toml"
+      ],
+      "env": {
+        "VWMCP_HUMAN_CLIENT_SECRET": "<set-me>",
+        "VWMCP_HUMAN_PASSWORD": "<set-me>",
+        "VWMCP_AGENT_CLIENT_SECRET": "<set-me>",
+        "VWMCP_AGENT_PASSWORD": "<set-me>"
+      }
+    }
+  },
+  "_secretspec_manifest_example": {
+    "_comment": "Save this as secretspec.toml next to vaultwarden-mcp.toml. The [project] section is required by secretspec 0.18.",
+    "project": {
+      "name": "vaultwarden-mcp",
+      "revision": "1.0"
+    },
+    "profiles": {
+      "default": {
+        "VWMCP_HUMAN_CLIENT_SECRET": { "description": "OAuth client secret — human account", "required": true },
+        "VWMCP_HUMAN_PASSWORD":      { "description": "Master password — human account", "required": true },
+        "VWMCP_AGENT_CLIENT_SECRET": { "description": "OAuth client secret — agent account", "required": true },
+        "VWMCP_AGENT_PASSWORD":      { "description": "Master password — agent account", "required": true }
+      }
+    }
+  },
+  "_vaultwarden_mcp_toml_example": {
+    "_comment": "Save this as vaultwarden-mcp.toml. Server URLs and client IDs are non-secret; secrets use secret:// references.",
+    "server": { "default_transport": "stdio", "allow_http": false },
+    "accounts": [
+      {
+        "label": "human",
+        "server": "https://vault.example.com",
+        "client_id": "user.0c9e10f3-...",
+        "client_secret": "secret://VWMCP_HUMAN_CLIENT_SECRET",
+        "password": "secret://VWMCP_HUMAN_PASSWORD"
+      },
+      {
+        "label": "agent",
+        "server": "https://vault.example.com",
+        "client_id": "user.57ab3663-...",
+        "client_secret": "secret://VWMCP_AGENT_CLIENT_SECRET",
+        "password": "secret://VWMCP_AGENT_PASSWORD"
+      }
+    ]
+  }
+}
