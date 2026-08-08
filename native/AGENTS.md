@@ -14,7 +14,8 @@ for writes.
 - `native/src/main.rs` — CLI entrypoint (`clap`): `serve` + `print-config`
 - `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto, write methods
 - `native/src/mcp.rs` — `ServerHandler` impl, tool list, `AccountConfig`, write-tool param structs
-- `native/src/config.rs` — TOML config loader + env-var merge + `secret://` URIs
+- `native/src/config.rs` — TOML config loader + env-var merge; resolves `secret://NAME` URIs via secretspec
+- `native/src/secrets.rs` — secretspec 0.18 runtime integration (resolve manifest + look up `secret://` values)
 - `native/src/crypto.rs` — production symmetric encrypt (`2.{iv}|{ct}|{mac}`, random IV);
   needed because `vaultwarden-cli`'s `CryptoKeys` exposes decrypt but not encrypt
 - `native/src/api_write.rs` — thin write HTTP client (POST/PUT/DELETE on `/api/ciphers`);
@@ -33,6 +34,11 @@ for writes.
   HMAC-verified on connect, wrong password aborts.
 - `http` feature is default-on; build stdio-only with `--no-default-features`.
 - Config contract: [.agents/plans/01-config.md](../.agents/plans/01-config.md).
+- secretspec contract: `secret://NAME` references resolve at startup via the
+  secretspec 0.18 runtime (provider via `--secretspec-provider`, default `env`;
+  profile via `--secretspec-profile`, default `default`). Built providers:
+  `env`, `dotenv:<path>`, `keyring`, `bw`. Plaintext passes through; an
+  unresolvable reference fails the load with a clear error.
 - Write-path contract: [.agents/plans/02-write-and-secretspec.md](../.agents/plans/02-write-and-secretspec.md) —
   Option A (keep `vaultwarden-cli` dep; local encrypt + own write HTTP client).
   v1 supports login + secure-note create/edit; card/identity/ssh are read-only.

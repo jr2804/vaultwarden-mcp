@@ -18,6 +18,7 @@ pub mod api_write;
 pub mod config;
 pub mod crypto;
 pub mod mcp;
+pub mod secrets;
 
 /// A connected vaultwarden session with decrypted cipher access.
 pub struct VaultwardenSession {

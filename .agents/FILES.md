@@ -14,9 +14,12 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | What | Where | Key names |
 | ------ | ------- | ----------- |
 | **Production entry (Rust)** | [`native/src/main.rs`](../native/src/main.rs) | CLI args, transport selection, config-file loader |
-| **MCP server handlers** | [`native/src/mcp.rs`](../native/src/mcp.rs) | `ServerHandler` impl, tool list |
-| **Vault client + crypto** | [`native/src/lib.rs`](../native/src/lib.rs) | `VaultwardenSession`, key derivation, decrypt |
-| **Config file loader** | [`native/src/config.rs`](../native/src/config.rs) | TOML parse, env-var merge, `secret://` URI validation |
+| **MCP server handlers** | [`native/src/mcp.rs`](../native/src/mcp.rs) | `ServerHandler` impl, read + write tool list |
+| **Vault client + crypto** | [`native/src/lib.rs`](../native/src/lib.rs) | `VaultwardenSession`, key derivation, decrypt, write methods |
+| **Field encryption** | [`native/src/crypto.rs`](../native/src/crypto.rs) | production symmetric encrypt for vault writes |
+| **Write HTTP client** | [`native/src/api_write.rs`](../native/src/api_write.rs) | POST/PUT/DELETE on `/api/ciphers` |
+| **secretspec resolver** | [`native/src/secrets.rs`](../native/src/secrets.rs) | secretspec 0.18 manifest load + `secret://` value lookup |
+| **Config file loader** | [`native/src/config.rs`](../native/src/config.rs) | TOML parse, env-var merge, `secret://` resolution via secretspec |
 | **Rust crate config** | [`native/Cargo.toml`](../native/Cargo.toml) | `rmcp` version, `vaultwarden-cli`, `toml`, features (`http`) |
 | **Bundled config file (example)** | [`vaultwarden-mcp.toml.example`](../vaultwarden-mcp.toml.example) | Annotated sample config file |
 | **secretspec manifest (scaffold)** | [`secretspec.toml`](../secretspec.toml) | Secret declarations for the upcoming secretspec integration |

@@ -2,25 +2,15 @@
 //!
 //! See `.agents/plans/01-config.md` for the design.
 //!
-//! ## secretspec integration (status)
+//! ## secretspec integration
 //!
-//! The `secret://` URI scheme is parsed but *not yet resolved* against the
-//! secretspec runtime. The secretspec crate line (0.2.x → 0.18.x) is mid-
-//! migration and the public surface is unstable; once the target version
-//! settles, this file will be the integration point. The expected wiring is:
-//!
-//!   1. Add `secretspec = "0.18"` to `Cargo.toml` (and keep
-//!      `secretspec-derive` if compile-time codegen is desired).
-//!   2. Use `Secrets::load_from(<path>)` with the path of the bundled
-//!      `secretspec.toml` (or `SECRETSPEC_MANIFEST`).
-//!   3. Pass a `--secretspec-provider` (default `"env"`) and
-//!      `--secretspec-profile` (default `"default"`).
-//!   4. Call `spec.resolve()` → `ResolveResponse` → look up each `secret://`
-//!      reference by name in `response.secrets[name].value`.
-//!
-//! Until then, all `secret://` values are treated as opaque strings and any
-//! user who supplies one will get a clear error at login time. This keeps
-//! the config-file loader fully usable today.
+//! The `secret://NAME` URI scheme is resolved against the secretspec 0.18
+//! runtime by [`secrets::resolve`] before any account connects. The provider
+//! is selected by `--secretspec-provider` (default `env`); the profile by
+//! `--secretspec-profile` (default `default`). Supported providers include
+//! `env`, `dotenv:<path>`, `keyring`, and `bw` (Bitwarden CLI). Plaintext
+//! values pass through untouched; a `secret://` reference that cannot be
+//! resolved fails the load with a clear error rather than reaching the server.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -150,21 +140,44 @@ pub fn has_secret_uris(file: &ConfigFile) -> bool {
     file.accounts.iter().any(|a| a.uses_secretspec())
 }
 
-/// Effective account list after merging config + env. Flags a warning if any
-/// `secret://` reference is present (the runtime cannot resolve it yet).
+/// Effective account list after merging config + env, resolving any
+/// `secret://NAME` references against the secretspec runtime.
+///
+/// Resolution order per field: env var > `secret://` resolution > config file
+/// plaintext. If a `secret://` reference is present but secretspec cannot
+/// resolve it (missing manifest, missing secret, missing-required failure),
+/// the whole load fails with a clear error — we never pass a raw `secret://`
+/// string to the server.
 pub fn resolve_accounts(
     file: ConfigFile,
-    _secretspec_provider: &str,
-    _secretspec_profile: &str,
+    secretspec_provider: &str,
+    secretspec_profile: &str,
 ) -> Result<Vec<AccountConfigFile>> {
-    if has_secret_uris(&file) {
-        eprintln!(
-            "warning: vaultwarden-mcp.toml contains 'secret://' references; \
-             secretspec integration is not yet wired. The reference will be \
-             passed to the server as-is and login will fail until this is \
-             resolved. See .agents/plans/01-config.md."
-        );
-    }
+    // Resolve the secretspec manifest once (not per-account) if any field uses
+    // a secret:// reference. Secrets::load() walks the cwd and parents for
+    // secretspec.toml and honors SECRETSPEC_MANIFEST.
+    let secrets = if has_secret_uris(&file) {
+        Some(crate::secrets::resolve(
+            None,
+            secretspec_provider,
+            secretspec_profile,
+        )?)
+    } else {
+        None
+    };
+
+    let resolve_field = |env_value: Option<String>, file_value: String| -> Result<String> {
+        let merged = merge_field(env_value, file_value);
+        match (&secrets, merged.starts_with(crate::secrets::SECRET_SCHEME)) {
+            (Some(resp), true) => crate::secrets::resolve_value(&merged, resp),
+            (None, true) => Err(anyhow!(
+                "field references '{merged}' but no secretspec.toml was loaded; \
+                 set --secretspec-provider or provide a secretspec.toml manifest"
+            )),
+            _ => Ok(merged),
+        }
+    };
+
     let mut out: Vec<AccountConfigFile> = Vec::new();
 
     for account in file.accounts.clone() {
@@ -177,10 +190,10 @@ pub fn resolve_accounts(
         };
         out.push(AccountConfigFile {
             label: account.label.clone(),
-            server: merge_field(env_get("SERVER"), account.server),
-            client_id: merge_field(env_get("CLIENT_ID"), account.client_id),
-            client_secret: merge_field(env_get("CLIENT_SECRET"), account.client_secret),
-            password: merge_field(env_get("PASSWORD"), account.password),
+            server: resolve_field(env_get("SERVER"), account.server)?,
+            client_id: resolve_field(env_get("CLIENT_ID"), account.client_id)?,
+            client_secret: resolve_field(env_get("CLIENT_SECRET"), account.client_secret)?,
+            password: resolve_field(env_get("PASSWORD"), account.password)?,
             allow_http: account.allow_http.or_else(|| {
                 env::var("VAULTWARDEN_ALLOW_HTTP")
                     .ok()
@@ -663,5 +676,67 @@ mod tests {
         };
         let err = validate_required_fields(&[a]).unwrap_err().to_string();
         assert!(err.contains("password"), "expected 'password', got: {err}");
+    }
+
+    // ── secretspec resolution ───────────────────────────────────────────
+
+    /// Write a temp secretspec.toml and resolve a secret:// reference against
+    /// it via the env provider. Returns the temp dir so the caller controls
+    /// cleanup.
+    fn write_temp_manifest(content: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("secretspec.toml"), content).expect("write manifest");
+        dir
+    }
+
+    #[test]
+    fn resolve_value_resolves_secret_uri_via_env_provider() {
+        let dir = write_temp_manifest(
+            "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_PRESENT = { description = \"pw\" }\n",
+        );
+        let manifest = dir.path().join("secretspec.toml");
+
+        unsafe {
+            env::set_var("VWMCP_TEST_PRESENT", "super-secret");
+        }
+        let resp = crate::secrets::resolve(Some(&manifest), "env", "default").expect("resolve");
+        unsafe {
+            env::remove_var("VWMCP_TEST_PRESENT");
+        }
+
+        let val =
+            crate::secrets::resolve_value("secret://VWMCP_TEST_PRESENT", &resp).expect("lookup");
+        assert_eq!(val, "super-secret");
+    }
+
+    #[test]
+    fn resolve_value_passes_plaintext_through_unchanged() {
+        // No secret:// refs in the config → secretspec is never loaded.
+        let toml = "\n            [[accounts]]\n            label = \"p\"\n            server = \"https://x\"\n            client_id = \"id\"\n            client_secret = \"plaintext-secret\"\n            password = \"plaintext-pw\"\n        ";
+        let cfg: ConfigFile = toml::from_str(toml).unwrap();
+        // resolve_accounts with no secret:// refs must not touch secretspec.
+        let accounts = resolve_accounts(cfg, "env", "default").expect("resolve plaintext");
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].client_secret, "plaintext-secret");
+        assert_eq!(accounts[0].password, "plaintext-pw");
+    }
+
+    #[test]
+    fn resolve_value_errors_on_missing_secret() {
+        let dir = write_temp_manifest(
+            "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_ABSENT = { description = \"pw\", required = true }\n",
+        );
+        let manifest = dir.path().join("secretspec.toml");
+        // Distinct env var name so parallel tests can't satisfy it.
+        unsafe {
+            env::remove_var("VWMCP_TEST_ABSENT");
+        }
+        let err = crate::secrets::resolve(Some(&manifest), "env", "default");
+        assert!(err.is_err(), "missing required secret must error");
+        let msg = format!("{}", err.unwrap_err());
+        assert!(
+            msg.contains("missing") || msg.contains("VWMCP_TEST_ABSENT"),
+            "error should name the missing secret, got: {msg}"
+        );
     }
 }

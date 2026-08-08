@@ -7,9 +7,9 @@
 //!
 //! Configuration is loaded from a TOML file (--config) and merged with
 //! environment variables. Env vars win per-field. Secret references in the
-//! TOML can use the `secret://provider/key` syntax (parsed today; the
-//! secretspec runtime resolution is a planned follow-up — see
-//! `.agents/plans/01-config.md`).
+//! TOML use the `secret://NAME` syntax and are resolved against the secretspec
+//! runtime (provider via `--secretspec-provider`, default `env`).
+//! See `.agents/plans/01-config.md` for the full design.
 //!
 //! For env-var-only mode, set: VAULTWARDEN_SERVER, VAULTWARDEN_CLIENT_ID,
 //! VAULTWARDEN_CLIENT_SECRET, VAULTWARDEN_PASSWORD, VAULTWARDEN_ACCOUNT_NAME,
@@ -53,12 +53,11 @@ enum Commands {
         /// (./vaultwarden-mcp.toml → ~/.config/vaultwarden-mcp/config.toml).
         #[arg(long)]
         config: Option<PathBuf>,
-        /// secretspec profile name (default: "default"). Reserved for the
-        /// upcoming secretspec integration; today it has no effect.
+        /// secretspec profile name (default: "default").
         #[arg(long, default_value = "default")]
         secretspec_profile: String,
-        /// secretspec provider URI (default: "env"). Reserved for the
-        /// upcoming secretspec integration; today it has no effect.
+        /// secretspec provider (default: "env"). Also: dotenv:<path>, keyring,
+        /// bw (Bitwarden CLI). See https://secretspec.dev/providers/
         #[arg(long, default_value = "env")]
         secretspec_provider: String,
     },
@@ -67,8 +66,10 @@ enum Commands {
         /// Path to a TOML config file
         #[arg(long)]
         config: Option<PathBuf>,
+        /// secretspec profile name (default: "default").
         #[arg(long, default_value = "default")]
         secretspec_profile: String,
+        /// secretspec provider (default: "env").
         #[arg(long, default_value = "env")]
         secretspec_provider: String,
     },

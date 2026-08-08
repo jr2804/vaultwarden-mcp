@@ -46,8 +46,10 @@ cbc = "0.2"
 hmac = "0.13"
 sha2 = "0.11"
 base64 = "0.23"
+secretspec = { version = "0.18", default-features = false, features = ["cli", "keyring", "bw"] }
 
 [dev-dependencies]
+tempfile = "3.27.0"
 # Crypto fixture builder for integration tests — mirrors vaultwarden-cli's
 # internal test_helpers::encrypt_bytes_for_test (AES-256-CBC + HMAC-SHA256).
 # Production encrypt now uses the same crates as regular dependencies; these
