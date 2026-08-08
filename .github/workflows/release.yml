@@ -22,12 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             artifact_name: vaultwarden-mcp-linux-x86_64
             binary_name: vaultwarden-mcp
 
-          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
             artifact_name: vaultwarden-mcp-linux-aarch64
             binary_name: vaultwarden-mcp
@@ -50,6 +50,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # musl cross-toolchain + pkg-config needed for the C deps (ring, keyring)
+      # when building static Linux binaries against the musl libc.
+      - name: Install musl toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools pkg-config
+
       - name: Cache cargo registry & build
         uses: actions/cache@v4
         with:
@@ -64,6 +70,16 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: native
+
+      # Verify Linux binaries are fully static (no glibc runtime dependency).
+      # musl + crt-static produces "not a dynamic executable". This guard fails
+      # the build early if a transitive C dep silently re-introduces dynamic linking.
+      - name: Verify static link (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ldd native/target/${{ matrix.target }}/release/${{ matrix.binary_name }} \
+            && { echo "ERROR: binary is dynamically linked"; exit 1; } \
+            || echo "OK: fully static binary"
 
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
