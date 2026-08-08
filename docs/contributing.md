@@ -62,7 +62,7 @@ CalVer (`YYYY.MM.N`). Version is set in `native/Cargo.toml`:
 
 ```toml
 [package]
-version = "2026.8.0"
+version = "2026.8.1"
 ```
 
 Git tags matching `2026.*` (e.g. `2026.8.1`) trigger automated binary releases via GitHub Actions.

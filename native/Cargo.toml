@@ -1,6 +1,6 @@
 [package]
 name = "vaultwarden-mcp"
-version = "2026.8.0"
+version = "2026.8.1"
 edition = "2024"
 rust-version = "1.88"
 description = "MCP server for Vaultwarden (Bitwarden-compatible password manager) — search, read, and manage vault entries via the Model Context Protocol"
