@@ -10,7 +10,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::VaultwardenSession;
+use crate::{CipherEdit, CipherInput, VaultwardenSession};
 
 /// Account configuration for connecting to a Vaultwarden instance.
 #[derive(Debug, Clone)]
@@ -38,6 +38,30 @@ pub struct GetCipherParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SyncParams {
     account: Option<String>,
+}
+
+/// Params for cipher-create / write tools. `account` selects the session.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateCipherParams {
+    #[serde(flatten)]
+    pub input: CipherInput,
+    pub account: String,
+}
+
+/// Params for edit. `input` is the partial overlay (None = unchanged).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EditCipherParams {
+    pub cipher_id: String,
+    pub account: String,
+    #[serde(flatten)]
+    pub input: CipherEdit,
+}
+
+/// Params for delete / soft-delete / restore.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CipherIdParams {
+    pub cipher_id: String,
+    pub account: String,
 }
 
 /// Generate JSON schema for a type implementing JsonSchema as JsonObject.
@@ -96,6 +120,31 @@ impl VaultwardenMcpServer {
                 "List all configured vaultwarden accounts.",
                 Arc::new(Map::new()),
             ),
+            Tool::new(
+                "create_cipher",
+                "Create a new vault entry (login or secure note). Returns the created entry.",
+                schema_for::<CreateCipherParams>(),
+            ),
+            Tool::new(
+                "edit_cipher",
+                "Edit an existing vault entry. Every field is optional; omit a field to leave it unchanged, or pass null to clear it. cipher_type cannot change.",
+                schema_for::<EditCipherParams>(),
+            ),
+            Tool::new(
+                "soft_delete_cipher",
+                "Move a vault entry to the trash (reversible via restore_cipher).",
+                schema_for::<CipherIdParams>(),
+            ),
+            Tool::new(
+                "delete_cipher",
+                "Permanently delete a vault entry. This cannot be undone.",
+                schema_for::<CipherIdParams>(),
+            ),
+            Tool::new(
+                "restore_cipher",
+                "Restore a soft-deleted (trashed) vault entry.",
+                schema_for::<CipherIdParams>(),
+            ),
         ];
 
         Ok(Self {
@@ -117,7 +166,7 @@ impl ServerHandler for VaultwardenMcpServer {
         .with_server_info(Implementation::new("vaultwarden-mcp", env!("CARGO_PKG_VERSION")))
         .with_protocol_version(ProtocolVersion::V_2026_07_28)
         .with_instructions(
-            "MCP server for Vaultwarden. Available tools: search, get_cipher, sync, list_accounts."
+            "MCP server for Vaultwarden. Read tools: search, get_cipher, sync, list_accounts. Write tools: create_cipher, edit_cipher, soft_delete_cipher, delete_cipher, restore_cipher."
         )
     }
 
@@ -241,10 +290,105 @@ impl ServerHandler for VaultwardenMcpServer {
                 .into())
             }
 
+            "create_cipher" => {
+                let params: CreateCipherParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .create_cipher(params.input)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "edit_cipher" => {
+                let params: EditCipherParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .edit_cipher(&params.cipher_id, params.input)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "soft_delete_cipher" => {
+                let params: CipherIdParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .soft_delete_cipher(&params.cipher_id)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "delete_cipher" => {
+                let params: CipherIdParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                session
+                    .delete_cipher(&params.cipher_id)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                let msg = serde_json::json!({"cipher_id": params.cipher_id, "deleted": true});
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&msg).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "restore_cipher" => {
+                let params: CipherIdParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .restore_cipher(&params.cipher_id)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
             name => {
                 let msg = format!("unknown tool: {}", name);
                 Err(McpError::invalid_params(msg, None))
             }
         }
     }
+}
+
+/// Look up a session by exact label, returning an MCP error if not found.
+/// Write tools require a single explicit account (unlike read tools, which
+/// can fan out across all accounts), because a write must target one vault.
+fn find_session<'a>(
+    sessions: &'a [(String, VaultwardenSession)],
+    account: &str,
+) -> Result<&'a VaultwardenSession, McpError> {
+    sessions
+        .iter()
+        .find(|(label, _)| label == account)
+        .map(|(_, s)| s)
+        .ok_or_else(|| McpError::invalid_params(format!("account '{account}' not found"), None))
 }

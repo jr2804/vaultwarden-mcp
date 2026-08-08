@@ -2,21 +2,28 @@
 
 ## Purpose
 
-Rust MCP server — the production codebase. Exposes `search`, `get_cipher`,
-`sync`, `list_accounts` over MCP v3.0 (2026-07-28) via `rmcp`, with
-`vaultwarden-cli` for crypto.
+Rust MCP server — the production codebase. Exposes **read tools**
+(`search`, `get_cipher`, `sync`, `list_accounts`) and **write tools**
+(`create_cipher`, `edit_cipher`, `soft_delete_cipher`, `delete_cipher`,
+`restore_cipher`) over MCP v3.0 (2026-07-28) via `rmcp`, with
+`vaultwarden-cli` for read/crypto-key derivation and a local encrypt path
+for writes.
 
 ## Ownership
 
 - `native/src/main.rs` — CLI entrypoint (`clap`): `serve` + `print-config`
-- `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto
-- `native/src/mcp.rs` — `ServerHandler` impl, tool list, `AccountConfig`
+- `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto, write methods
+- `native/src/mcp.rs` — `ServerHandler` impl, tool list, `AccountConfig`, write-tool param structs
 - `native/src/config.rs` — TOML config loader + env-var merge + `secret://` URIs
+- `native/src/crypto.rs` — production symmetric encrypt (`2.{iv}|{ct}|{mac}`, random IV);
+  needed because `vaultwarden-cli`'s `CryptoKeys` exposes decrypt but not encrypt
+- `native/src/api_write.rs` — thin write HTTP client (POST/PUT/DELETE on `/api/ciphers`);
+  exists because `vaultwarden-cli`'s `ApiClient` is read-only with private fields
 - `native/Cargo.toml` — deps, features (`http` default), `[dev-dependencies]` for tests
 - `native/tests/common/mod.rs` — shared test fixtures (key derivation + cipher encryption helpers)
 - `native/tests/crypto_roundtrip.rs` — **Tier 1**: offline crypto round-trip (no server, no Docker)
 - `native/tests/integration_mock.rs` — **Tier 2**: wiremock end-to-end against mock
-  `/identity/connect/token` + `/api/sync` (no Docker, no real Vaultwarden)
+  `/identity/connect/token`, `/api/sync`, and `/api/ciphers` write endpoints (no Docker)
 
 ## Local Contracts
 
@@ -26,6 +33,11 @@ Rust MCP server — the production codebase. Exposes `search`, `get_cipher`,
   HMAC-verified on connect, wrong password aborts.
 - `http` feature is default-on; build stdio-only with `--no-default-features`.
 - Config contract: [.agents/plans/01-config.md](../.agents/plans/01-config.md).
+- Write-path contract: [.agents/plans/02-write-and-secretspec.md](../.agents/plans/02-write-and-secretspec.md) —
+  Option A (keep `vaultwarden-cli` dep; local encrypt + own write HTTP client).
+  v1 supports login + secure-note create/edit; card/identity/ssh are read-only.
+  Edit is partial-overlay (`None` = unchanged, `Some(None)` = clear). Hard-delete
+  is permanent; soft-delete + restore round-trip via `deletedDate`.
 - `VaultwardenSession::decrypt_ciphers` / `cipher_to_entry` are `pub` so integration
   tests can exercise the decrypt path against fixtures without a live server.
 - Tests are Docker-free and network-free: Tier 1 is pure crypto; Tier 2 uses

@@ -33,14 +33,25 @@ toml = "0.8"
 axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
 
-[dev-dependencies]
-# Crypto fixture builder for integration tests — mirrors vaultwarden-cli's
-# internal test_helpers::encrypt_bytes_for_test (AES-256-CBC + HMAC-SHA256).
+# Write path: cipher create/edit/delete endpoints + field encryption.
+# The vaultwarden-cli ApiClient only implements read endpoints, so writes go
+# through our own reqwest client. rand provides the per-field AES IV.
+# aes/cbc/hmac/sha2/base64 implement the Bitwarden symmetric cipher envelope
+# (CryptoKeys exposes decrypt but not encrypt, so we implement the matching
+# encrypt here).
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+rand = "0.10"
 aes = "0.9"
 cbc = "0.2"
 hmac = "0.13"
 sha2 = "0.11"
 base64 = "0.23"
+
+[dev-dependencies]
+# Crypto fixture builder for integration tests — mirrors vaultwarden-cli's
+# internal test_helpers::encrypt_bytes_for_test (AES-256-CBC + HMAC-SHA256).
+# Production encrypt now uses the same crates as regular dependencies; these
+# dev-deps remain so the test fixture (fixed-IV variant) can keep using them.
 wiremock = "0.6"
 
 [profile.release]

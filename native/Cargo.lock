@@ -2716,6 +2716,8 @@ dependencies = [
  "cbc 0.2.1",
  "clap",
  "hmac 0.13.0",
+ "rand",
+ "reqwest",
  "rmcp",
  "schemars 0.8.22",
  "serde",

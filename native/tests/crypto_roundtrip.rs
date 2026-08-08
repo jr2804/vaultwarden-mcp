@@ -94,3 +94,30 @@ fn encrypt_decrypt_roundtrip_via_library_decrypt() {
     let pt = keys.decrypt(&ct).expect("library decrypt");
     assert_eq!(pt, b"round-trip-me");
 }
+
+#[test]
+fn production_encrypt_roundtrips_through_library_decrypt() {
+    // The real contract: vaultwarden_mcp::crypto::encrypt_string (production,
+    // random IV) must be decryptable by the library's public CryptoKeys —
+    // this is what the live server relies on for every written field.
+    use vaultwarden_mcp::crypto::encrypt_string;
+
+    let (keys, _): (CryptoKeys, _) = derive_test_keys();
+    for plaintext in [
+        "",
+        "x",
+        "p@ssw0rd!",
+        "🔐 unicode密码",
+        std::str::from_utf8(&[b'a'; 256]).unwrap(),
+    ] {
+        let ct = encrypt_string(plaintext, keys.enc_key_bytes(), keys.mac_key_bytes())
+            .expect("production encrypt");
+        let pt = keys
+            .decrypt_to_string(&ct)
+            .expect("library decrypt of production ciphertext");
+        assert_eq!(
+            pt, plaintext,
+            "production round-trip failed for {plaintext:?}"
+        );
+    }
+}
