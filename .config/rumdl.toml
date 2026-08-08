@@ -41,7 +41,7 @@
 # respect-gitignore = true
 
 # Maximum allowed line length (default: 80)
-line-length = 120
+line-length = 180
 
 # Markdown flavor/dialect (default: "standard")
 # Options: standard, gfm, commonmark, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst

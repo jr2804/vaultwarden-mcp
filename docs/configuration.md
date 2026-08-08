@@ -38,7 +38,7 @@ non-secret values in the TOML and inject only the secret ones via env.
 List account labels in `VAULTWARDEN_ACCOUNTS=jan,work`, then set per-account
 vars for each:
 
-```
+```text
 VAULTWARDEN_ACCOUNTS=jan,work
 VAULTWARDEN_ACCOUNT_JAN_SERVER=https://vault.jan.example.com
 VAULTWARDEN_ACCOUNT_JAN_CLIENT_ID=user.jan
@@ -146,7 +146,7 @@ manifest and provider are wired correctly:
 vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
 ```
 
-```
+```text
 vaultwarden-mcp — effective config:
   [human]
     server:        https://vault.example.com
@@ -165,7 +165,7 @@ vaultwarden-mcp — effective config:
 If a required secret is missing, startup fails fast with the name of the
 offending secret:
 
-```
+```text
 Error: secretspec resolution is missing required secrets: VWMCP_AGENT_PASSWORD
 ```
 
