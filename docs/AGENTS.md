@@ -8,6 +8,7 @@ AGENTS.md files point to docs, never duplicate them.
 ## Ownership
 
 - `docs/index.md` — landing page
+- `docs/configuration.md` — single- and multi-account config, env vars, secretspec `secret://` resolution
 - `docs/architecture.md` — system design, data flow, security model
 - `docs/build.md` — compiling the Rust binary
 - `docs/contributing.md` — development workflow, PR guidelines

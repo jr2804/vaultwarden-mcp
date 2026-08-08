@@ -5,6 +5,7 @@ Welcome to the Vaultwarden MCP documentation.
 ## User Guide
 
 - **[README](https://github.com/jr2804/vaultwarden-mcp#readme)** — installation, configuration, MCP client setup
+- **[Configuration](configuration.md)** — single- and multi-account setup, secretspec `secret://` resolution
 
 ## Developer Guide
 
