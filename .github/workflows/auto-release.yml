@@ -1,8 +1,9 @@
 name: Auto Release
 
 # Bump the CalVer version and cut a release on every push to main — unless the
-# last commit message carries the magic marker `[skip-release]` (append it to a
-# commit when you do NOT want a version bump / new release).
+# head commit's SUBJECT LINE ends with `[skip-release]` (e.g.
+# `fix: typo [skip-release]`). A bare mention of the marker in the commit body
+# does NOT skip — the directive must be on the subject line.
 #
 # Pushes made with GITHUB_TOKEN do not trigger other workflows, so this
 # workflow cannot rely on its own tag push to fire `release.yml`. Instead it
@@ -25,14 +26,31 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip-release]')"
 
     steps:
+      - name: Check for skip directive
+        id: skip
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          # Skip only when the SUBJECT LINE (first line) of the head commit
+          # ends with [skip-release]. A bare mention in the body (docs,
+          # explanations) must not skip the release.
+          subject="$(printf '%s' "$MSG" | head -1)"
+          echo "subject=$subject"
+          if [[ "$subject" == *'[skip-release]' ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.skip.outputs.skip != 'true'
         with:
           fetch-depth: 0  # need all tags to compute the next CalVer version
 
       - name: Compute next version
+        if: steps.skip.outputs.skip != 'true'
         id: version
         run: |
           set -euo pipefail
@@ -47,6 +65,7 @@ jobs:
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
       - name: Bump version in Cargo.toml + Cargo.lock
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           next="${{ steps.version.outputs.version }}"
@@ -61,6 +80,7 @@ jobs:
           grep -A1 'name = "vaultwarden-mcp"' native/Cargo.lock | grep '^version'
 
       - name: Commit + push bump, create + push tag
+        if: steps.skip.outputs.skip != 'true'
         run: |
           set -euo pipefail
           next="${{ steps.version.outputs.version }}"
@@ -73,6 +93,7 @@ jobs:
           git push origin "$next"
 
       - name: Dispatch release build on the new tag
+        if: steps.skip.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

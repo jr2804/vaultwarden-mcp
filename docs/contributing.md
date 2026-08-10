@@ -75,9 +75,11 @@ Releases are fully automated:
    version in `native/Cargo.toml` + `Cargo.lock`, commits it, creates the
    `YYYY.M.N` tag, and dispatches `release.yml` to build binaries + publish the
    GitHub release. Nothing to do manually.
-2. **Skip a release** → append the magic marker `[skip-release]` to the last
-   commit message (e.g. `fix: typo [skip-release]`). The workflow checks the
-   head commit of the push and exits early — no bump, no tag, no release.
+2. **Skip a release** → end the commit's **subject line** with the magic marker
+   `[skip-release]` (e.g. `fix: typo [skip-release]`). The workflow checks
+   only the first line of the head commit, so a bare mention of the marker in
+   the commit body (docs, explanations) does NOT skip — the directive must be
+   on the subject line. The workflow exits early — no bump, no tag, no release.
 
 Manual fallback (still supported):
 
