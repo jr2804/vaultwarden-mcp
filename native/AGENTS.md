@@ -40,7 +40,7 @@ for writes.
 - secretspec contract: `secret://NAME` references resolve at startup via the
   secretspec 0.18 runtime (provider via `--secretspec-provider`, default `env`;
   profile via `--secretspec-profile`, default `default`). Built providers:
-  `env`, `dotenv:<path>`, `keyring`, `bw`. Plaintext passes through; an
+  `env`, `dotenv:<path>`, `keyring`, `bw`, `age`, `kdbx`. Plaintext passes through; an
   unresolvable reference fails the load with a clear error.
 - Write-path contract: [.agents/plans/02-write-and-secretspec.md](../.agents/plans/02-write-and-secretspec.md) —
   Option A (keep `vaultwarden-cli` dep; local encrypt + own write HTTP client).

@@ -90,7 +90,7 @@ On login, each `VaultwardenSession`:
 |-------|---------|
 | `rmcp` v3.1 | MCP v3.0 protocol implementation (ServerHandler, stdio/HTTP transport) |
 | `vaultwarden-cli` | Bitwarden REST API **read** client, PBKDF2 key derivation, symmetric key decrypt |
-| `secretspec` 0.18 | `secret://` resolution (providers: env, dotenv, keyring, bw) |
+| `secretspec` 0.18 | `secret://` resolution (providers: env, dotenv, keyring, bw, age, kdbx) |
 | `reqwest` | Write-path HTTP client (POST/PUT/DELETE on `/api/ciphers` and `/api/folders`) |
 | `aes` / `cbc` / `hmac` / `sha2` / `base64` | Field encryption for vault writes |
 | `clap` | CLI argument parsing |
