@@ -302,6 +302,7 @@ async fn create_cipher_posts_encrypted_body_and_returns_entry() {
             totp: None,
             notes: None,
             fields: None,
+            folder: None,
         })
         .await
         .expect("create");
@@ -508,6 +509,7 @@ async fn create_cipher_with_fields_encrypts_them() {
             uri: Some("https://f.test".into()),
             totp: None,
             notes: Some("a note".into()),
+            folder: None,
             fields: Some(vec![FieldInput {
                 name: "pin".into(),
                 value: Some("1234".into()),
@@ -518,4 +520,363 @@ async fn create_cipher_with_fields_encrypts_them() {
         .expect("create with fields");
 
     assert_eq!(entry.name, "With Fields");
+}
+
+// ── Folder tests ──────────────────────────────────────────────────────────────
+
+/// Build a folder response JSON with an encrypted name.
+fn folder_response(keys: &CryptoKeys, id: &str, name: &str) -> serde_json::Value {
+    let enc =
+        vaultwarden_mcp::crypto::encrypt_string(name, keys.enc_key_bytes(), keys.mac_key_bytes())
+            .expect("encrypt folder name");
+    serde_json::json!({
+        "id": id,
+        "name": enc,
+    })
+}
+
+/// Mount /api/sync including the given folders (as raw JSON values).
+async fn mount_sync_with_folders(
+    mock: &MockServer,
+    protected_key: &str,
+    ciphers_json: Vec<serde_json::Value>,
+    folders_json: Vec<serde_json::Value>,
+) {
+    let body = serde_json::json!({
+        "Profile": {
+            "Id": "user-1",
+            "Email": TEST_EMAIL,
+            "Name": "Test User",
+            "Key": protected_key,
+            "PrivateKey": "2.dummy",
+            "Organizations": [],
+        },
+        "Folders": folders_json,
+        "Collections": [],
+        "Ciphers": ciphers_json,
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/sync"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+        .mount(mock)
+        .await;
+}
+
+#[tokio::test]
+async fn create_folder_stores_encrypted_name_and_returns_decrypted() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/folders"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(folder_response(&keys, "folder-1", "Work")),
+        )
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let entry = session.create_folder("Work").await.expect("create folder");
+    assert_eq!(entry.id, "folder-1");
+    assert_eq!(entry.name, "Work");
+
+    // list_folders also reflects the newly created folder.
+    let folders = session.list_folders();
+    assert!(
+        folders
+            .iter()
+            .any(|f| f.id == "folder-1" && f.name == "Work")
+    );
+}
+
+#[tokio::test]
+async fn list_folders_returns_decrypted_names() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    let folder1 = folder_response(&keys, "f1", "Work");
+    let folder2 = folder_response(&keys, "f2", "Personal");
+    mount_sync_with_folders(&mock, &protected_key, vec![], vec![folder1, folder2]).await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let folders = session.list_folders();
+    assert_eq!(folders.len(), 2);
+    assert!(folders.iter().any(|f| f.id == "f1" && f.name == "Work"));
+    assert!(folders.iter().any(|f| f.id == "f2" && f.name == "Personal"));
+}
+
+#[tokio::test]
+async fn get_folder_id_resolves_name() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    let folder1 = folder_response(&keys, "f-42", "Dev");
+    mount_sync_with_folders(&mock, &protected_key, vec![], vec![folder1]).await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    assert_eq!(session.folder_id_for_name("Dev"), Some("f-42".into()));
+    assert_eq!(session.folder_id_for_name("Devv"), None);
+    assert_eq!(session.folder_id_for_name("Unknown"), None);
+}
+
+#[tokio::test]
+async fn create_cipher_with_new_folder_auto_creates_it() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+
+    // Auto-create: first call POST /api/folders...
+    Mock::given(method("POST"))
+        .and(path("/api/folders"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(folder_response(
+            &keys,
+            "folder-auto",
+            "Work",
+        )))
+        .mount(&mock)
+        .await;
+
+    // ...then POST /api/ciphers with folderId=folder-auto.
+    Mock::given(method("POST"))
+        .and(path("/api/ciphers"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(login_response(
+            &keys,
+            "c-1",
+            "Site",
+            "u",
+            "p",
+            "https://x.test",
+        )))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let _entry = session
+        .create_cipher(CipherInput {
+            cipher_type: WriteCipherType::Login,
+            name: "Site".into(),
+            username: Some("u".into()),
+            password: Some("p".into()),
+            uri: Some("https://x.test".into()),
+            totp: None,
+            notes: None,
+            fields: None,
+            folder: Some("Work".into()),
+        })
+        .await
+        .expect("create with auto-folder");
+
+    // Verify the auto-created folder now appears in the cached list.
+    let folders = session.list_folders();
+    assert!(
+        folders
+            .iter()
+            .any(|f| f.id == "folder-auto" && f.name == "Work"),
+        "expected folder-auto in cached folders"
+    );
+}
+
+#[tokio::test]
+async fn create_cipher_with_existing_folder_reuses_id() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    // Seed a folder in the sync response so it's already cached.
+    let folder = folder_response(&keys, "existing-f", "Work");
+    mount_sync_with_folders(&mock, &protected_key, vec![], vec![folder]).await;
+
+    // Expect POST to /api/ciphers (NOT to /api/folders). If the session
+    // calls /api/folders, wiremock will panic (no mock registered).
+    Mock::given(method("POST"))
+        .and(path("/api/ciphers"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(login_response(
+            &keys,
+            "c-2",
+            "Site2",
+            "u2",
+            "p2",
+            "https://y.test",
+        )))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let _entry = session
+        .create_cipher(CipherInput {
+            cipher_type: WriteCipherType::Login,
+            name: "Site2".into(),
+            username: Some("u2".into()),
+            password: Some("p2".into()),
+            uri: Some("https://y.test".into()),
+            totp: None,
+            notes: None,
+            fields: None,
+            folder: Some("Work".into()),
+        })
+        .await
+        .expect("create with existing folder");
+
+    // No /api/folders call was made (no mock = no registered path).
+}
+
+#[tokio::test]
+async fn edit_cipher_moves_to_folder() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    // Seed a folder so it's already cached.
+    let folder = folder_response(&keys, "target-f", "Target");
+    mount_sync_with_folders(
+        &mock,
+        &protected_key,
+        vec![login(&keys, "c-move", "MoveMe", "u", "p", "https://m.test")],
+        vec![folder],
+    )
+    .await;
+
+    // get_cipher -> returns the cipherfrom sync; PUT returns the updated cipher.
+    Mock::given(method("PUT"))
+        .and(path("/api/ciphers/c-move"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json({
+            let mut r = login_response(&keys, "c-move", "MoveMe", "u", "p", "https://m.test");
+            r["folderId"] = serde_json::Value::String("target-f".into());
+            r
+        }))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let entry = session
+        .edit_cipher(
+            "c-move",
+            CipherEdit {
+                folder: Some(Some("Target".into())),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("edit move to folder");
+
+    assert_eq!(entry.folder.as_deref(), Some("Target"));
+    assert_eq!(entry.folder_id.as_deref(), Some("target-f"));
+}
+
+#[tokio::test]
+async fn edit_cipher_clears_folder_with_null() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    // Seed a cipher in a folder and a cipher with no folder.
+    let folder_json = folder_response(&keys, "f-old", "Old");
+    mount_sync_with_folders(
+        &mock,
+        &protected_key,
+        vec![login(
+            &keys,
+            "c-clear",
+            "ClearMe",
+            "u",
+            "p",
+            "https://c.test",
+        )],
+        vec![folder_json],
+    )
+    .await;
+
+    Mock::given(method("PUT"))
+        .and(path("/api/ciphers/c-clear"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(login_response(
+            &keys,
+            "c-clear",
+            "ClearMe",
+            "u",
+            "p",
+            "https://c.test",
+        )))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    // First, create a cipher and move it to a folder so it has folder data.
+    // Then edit it with folder=None to clear.
+    // (In wiremock the create/fetch use the same fixture so folder is None.)
+    let entry_after = session
+        .edit_cipher(
+            "c-clear",
+            CipherEdit {
+                folder: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("edit clear folder");
+
+    assert_eq!(entry_after.folder, None);
+    assert_eq!(entry_after.folder_id, None);
+}
+
+#[tokio::test]
+async fn delete_folder_removes_from_cache() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    let folder = folder_response(&keys, "del-f", "TrashMe");
+    mount_sync_with_folders(&mock, &protected_key, vec![], vec![folder]).await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/api/folders/del-f"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    assert!(session.folder_id_for_name("TrashMe").is_some());
+
+    session
+        .delete_folder("TrashMe")
+        .await
+        .expect("delete folder");
+
+    assert!(session.folder_id_for_name("TrashMe").is_none());
 }

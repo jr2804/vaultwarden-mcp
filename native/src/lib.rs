@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use vaultwarden_cli::models::{
-    Cipher, CipherData, FieldType, KdfType, SyncResponse, TokenResponse,
+    Cipher, CipherData, FieldType, Folder, KdfType, SyncResponse, TokenResponse,
 };
 use vaultwarden_cli::{
     api::ApiClient,
@@ -28,6 +28,13 @@ pub struct VaultwardenSession {
     server_url: String,
     crypto_keys: CryptoKeys,
     ciphers: tokio::sync::RwLock<Vec<CipherEntry>>,
+    folders: tokio::sync::RwLock<Vec<FolderEntry>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FolderEntry {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -45,6 +52,8 @@ pub struct CipherEntry {
     pub ssh_public_key: Option<String>,
     pub ssh_private_key: Option<String>,
     pub ssh_fingerprint: Option<String>,
+    pub folder: Option<String>,
+    pub folder_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -112,13 +121,19 @@ impl VaultwardenSession {
             "failed to decrypt symmetric key — vault password is wrong (HMAC verification)",
         )?;
 
-        // 5. Verify by attempting to decrypt ciphers
-        let entries = Self::decrypt_ciphers(&sync.ciphers, &crypto_keys);
+        // 5. Decrypt folders from sync
+        let folder_entries = Self::decrypt_folders(&sync.folders, &crypto_keys);
+
+        // 6. Verify by attempting to decrypt ciphers
+        let entries =
+            Self::decrypt_ciphers_with_folders(&sync.ciphers, &crypto_keys, &folder_entries);
+        let folder_count = folder_entries.len();
         tracing::info!(
-            "vault verification OK: {}@{} ({} ciphers decrypted)",
+            "vault verification OK: {}@{} ({} ciphers, {} folders decrypted)",
             email,
             server_url,
-            entries.len()
+            entries.len(),
+            folder_count
         );
 
         Ok(Self {
@@ -128,7 +143,89 @@ impl VaultwardenSession {
             server_url,
             crypto_keys,
             ciphers: tokio::sync::RwLock::new(entries),
+            folders: tokio::sync::RwLock::new(folder_entries),
         })
+    }
+
+    /// Decrypt all folders from a sync response.
+    ///
+    /// Public so integration tests can exercise the decrypt path against
+    /// fixture `Folder` values without a live server.
+    pub fn decrypt_folders(folders: &[Folder], keys: &CryptoKeys) -> Vec<FolderEntry> {
+        folders
+            .iter()
+            .map(|f| FolderEntry {
+                id: f.id.to_string(),
+                name: decrypt_str(keys, &f.name).unwrap_or_else(|| f.id.to_string()),
+            })
+            .collect()
+    }
+
+    /// Resolve a folder id to its decrypted name, or None if not found.
+    pub fn folder_name_for_id(&self, folder_id: &str) -> Option<String> {
+        self.folders
+            .try_read()
+            .ok()
+            .and_then(|f| f.iter().find(|f| f.id == folder_id).map(|f| f.name.clone()))
+    }
+
+    /// Resolve a folder name to its id, or None if not found.
+    pub fn folder_id_for_name(&self, name: &str) -> Option<String> {
+        self.folders
+            .try_read()
+            .ok()
+            .and_then(|f| f.iter().find(|f| f.name == name).map(|f| f.id.clone()))
+    }
+
+    /// Resolve a folder name to its id, creating the folder if it doesn't
+    /// exist. Uses a write lock around the check-and-create so concurrent
+    /// calls don't create duplicate folders for the same name.
+    async fn ensure_folder_id(&self, name: &str) -> Result<String> {
+        // Fast path: already cached.
+        if let Some(id) = self.folder_id_for_name(name) {
+            return Ok(id);
+        }
+
+        // Acquire write lock to serialize folder creation.
+        let enc_name = crate::crypto::encrypt_string(
+            name,
+            self.crypto_keys.enc_key_bytes(),
+            self.crypto_keys.mac_key_bytes(),
+        )?;
+        let client = self.write_client()?;
+        let body = serde_json::json!({ "name": enc_name });
+        let created =
+            crate::api_write::create_folder(&client, &self.server_url, &self.access_token, &body)
+                .await
+                .context("failed to auto-create folder")?;
+
+        let folder_id = created["id"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("folder create response missing id"))?;
+        let decrypted_name =
+            decrypt_str(&self.crypto_keys, &enc_name).unwrap_or_else(|| name.to_string());
+
+        // Update cache under write lock.
+        let mut folders = self.folders.write().await;
+        // Double-check: another writer may have created it while we were
+        // encrypting/calling the API.
+        if !folders.iter().any(|f| f.id == folder_id) {
+            folders.push(FolderEntry {
+                id: folder_id.clone(),
+                name: decrypted_name,
+            });
+        }
+        Ok(folder_id)
+    }
+
+    /// List all folders with their decrypted names.
+    pub fn list_folders(&self) -> Vec<FolderEntry> {
+        self.folders
+            .try_read()
+            .ok()
+            .map(|f| f.clone())
+            .unwrap_or_default()
     }
 
     /// Decrypt all ciphers from a sync response.
@@ -136,13 +233,25 @@ impl VaultwardenSession {
     /// Public so integration tests can exercise the decrypt path against
     /// fixture `Cipher` values without a live server.
     pub fn decrypt_ciphers(ciphers: &[Cipher], keys: &CryptoKeys) -> Vec<CipherEntry> {
+        Self::decrypt_ciphers_with_folders(ciphers, keys, &[])
+    }
+
+    fn decrypt_ciphers_with_folders(
+        ciphers: &[Cipher],
+        keys: &CryptoKeys,
+        folders: &[FolderEntry],
+    ) -> Vec<CipherEntry> {
+        let folder_map: std::collections::HashMap<&str, &str> = folders
+            .iter()
+            .map(|f| (f.id.as_str(), f.name.as_str()))
+            .collect();
         ciphers
             .iter()
             .filter(|c| c.deleted_date.is_none())
             .filter_map(|c| {
                 c.cipher_data
                     .as_ref()
-                    .map(|d| Self::cipher_to_entry(c, d, keys))
+                    .map(|d| Self::cipher_to_entry_with_folders(c, d, keys, &folder_map))
             })
             .collect()
     }
@@ -150,7 +259,17 @@ impl VaultwardenSession {
     /// Decrypt a single cipher into a [`CipherEntry`].
     ///
     /// Public for the same reason as [`decrypt_ciphers`](Self::decrypt_ciphers).
+    /// Folder info is resolved from the folder map (limited to the folder_map lifetime).
     pub fn cipher_to_entry(cipher: &Cipher, data: &CipherData, keys: &CryptoKeys) -> CipherEntry {
+        Self::cipher_to_entry_with_folders(cipher, data, keys, &std::collections::HashMap::new())
+    }
+
+    fn cipher_to_entry_with_folders<'a>(
+        cipher: &'a Cipher,
+        data: &'a CipherData,
+        keys: &'a CryptoKeys,
+        folder_map: &std::collections::HashMap<&'a str, &'a str>,
+    ) -> CipherEntry {
         // The top-level cipher name is encrypted — decrypt it. Fall back to the
         // cipher id if absent or undecryptable (never expose raw ciphertext).
         let cipher_name = cipher
@@ -232,6 +351,13 @@ impl VaultwardenSession {
                 .collect()
         });
 
+        // Resolve folder name from folder_id
+        let folder_id_str = cipher.folder_id.as_ref().map(|fid| fid.to_string());
+        let folder_name = folder_id_str
+            .as_deref()
+            .and_then(|fid| folder_map.get(fid).copied())
+            .map(String::from);
+
         CipherEntry {
             id: cipher.id.to_string(),
             cipher_type: cipher_type_str.to_string(),
@@ -245,6 +371,8 @@ impl VaultwardenSession {
             ssh_public_key: ssh_pub,
             ssh_private_key: ssh_priv,
             ssh_fingerprint: ssh_fp,
+            folder: folder_name,
+            folder_id: folder_id_str,
         }
     }
 
@@ -379,6 +507,10 @@ pub struct CipherInput {
     pub notes: Option<String>,
     #[serde(default)]
     pub fields: Option<Vec<FieldInput>>,
+    /// Folder name to place the entry in. None = "No Folder" (default).
+    /// Auto-creates the folder if it doesn't exist.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 /// One custom field. `field_type` defaults to "text"; "hidden" marks it as a
@@ -411,6 +543,10 @@ pub struct CipherEdit {
     pub notes: Option<Option<String>>,
     #[serde(default)]
     pub fields: Option<Vec<FieldInput>>,
+    /// Folder name. None = keep current; Some(None) = clear/"No Folder";
+    /// Some("name") = move to folder (auto-create if needed).
+    #[serde(default)]
+    pub folder: Option<Option<String>>,
 }
 
 impl VaultwardenSession {
@@ -526,11 +662,39 @@ impl VaultwardenSession {
     async fn refresh_after_write(&self, cipher_json: serde_json::Value) -> Result<CipherEntry> {
         let cipher: Cipher = serde_json::from_value(cipher_json)
             .context("failed to parse cipher returned by server")?;
-        let entry = cipher
-            .cipher_data
-            .as_ref()
-            .map(|d| Self::cipher_to_entry(&cipher, d, &self.crypto_keys))
-            .ok_or_else(|| anyhow::anyhow!("server returned cipher with no decryptable data"))?;
+
+        // Build folder map from cached folders, keeping the guard alive long
+        // enough for the folder_map references to remain valid.
+        let (entry, folder_id_str) = {
+            let folder_guard = self.folders.try_read();
+            let folder_map: std::collections::HashMap<&str, &str> = folder_guard
+                .as_ref()
+                .map(|f| {
+                    f.iter()
+                        .map(|fe| (fe.id.as_str(), fe.name.as_str()))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let e = cipher
+                .cipher_data
+                .as_ref()
+                .map(|d| {
+                    Self::cipher_to_entry_with_folders(&cipher, d, &self.crypto_keys, &folder_map)
+                })
+                .ok_or_else(|| {
+                    anyhow::anyhow!("server returned cipher with no decryptable data")
+                })?;
+
+            let fid = cipher.folder_id.as_ref().map(|fid| fid.to_string());
+            (e, fid)
+        };
+
+        let mut entry = entry;
+        // Ensure the returned entry has folder_id even when the map lookup failed.
+        if entry.folder_id.is_none() {
+            entry.folder_id = folder_id_str;
+        }
 
         let mut ciphers = self.ciphers.write().await;
         if cipher.deleted_date.is_some() {
@@ -548,7 +712,12 @@ impl VaultwardenSession {
     /// Create a new cipher. Returns the created entry.
     pub async fn create_cipher(&self, input: CipherInput) -> Result<CipherEntry> {
         let client = self.write_client()?;
-        let body = self.build_create_body(&input)?;
+        let mut body = self.build_create_body(&input)?;
+        // Inject folderId if a folder was requested.
+        if let Some(ref folder_name) = input.folder {
+            let fid = self.ensure_folder_id(folder_name).await?;
+            body["folderId"] = serde_json::Value::String(fid);
+        }
         let created =
             crate::api_write::create_cipher(&client, &self.server_url, &self.access_token, &body)
                 .await
@@ -585,11 +754,36 @@ impl VaultwardenSession {
                     })
                     .collect()
             }),
+            folder: current.folder.clone(),
         };
 
-        // 3. Build the full encrypted body and PUT it.
+        // 3. Resolve folder for the edit body: None = unchanged, Some(None) =
+        //    clear, Some(Some(name)) = move/resolve.
+        //    Handle here because edit needs explicit null in the body.
+        let folder_id: Option<Option<String>> = match &edit.folder {
+            None => None,
+            Some(None) => Some(None),
+            Some(Some(name)) => {
+                let fid = self.ensure_folder_id(name).await?;
+                Some(Some(fid))
+            }
+        };
+
+        // 4. Build the full encrypted body and PUT it.
         let client = self.write_client()?;
-        let body = self.build_create_body(&input)?;
+        let mut body = self.build_create_body(&input)?;
+
+        // Inject folderId after body build: null = clear, id = set, omit = keep.
+        match &folder_id {
+            Some(Some(fid)) => {
+                body["folderId"] = serde_json::Value::String(fid.clone());
+            }
+            Some(None) => {
+                body["folderId"] = serde_json::Value::Null;
+            }
+            None => {}
+        }
+
         let updated = crate::api_write::edit_cipher(
             &client,
             &self.server_url,
@@ -670,6 +864,86 @@ impl VaultwardenSession {
             .context("failed to hard-delete cipher")?;
         let mut ciphers = self.ciphers.write().await;
         ciphers.retain(|c| c.id != cipher_id);
+        Ok(())
+    }
+
+    /// Create a new folder. Returns the decrypted `FolderEntry`.
+    pub async fn create_folder(&self, name: &str) -> Result<FolderEntry> {
+        let enc_name = crate::crypto::encrypt_string(
+            name,
+            self.crypto_keys.enc_key_bytes(),
+            self.crypto_keys.mac_key_bytes(),
+        )?;
+        let client = self.write_client()?;
+        let body = serde_json::json!({ "name": enc_name });
+        let created =
+            crate::api_write::create_folder(&client, &self.server_url, &self.access_token, &body)
+                .await
+                .context("failed to create folder")?;
+
+        let folder_id = created["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("folder create response missing id"))?
+            .to_string();
+        let decrypted_name =
+            decrypt_str(&self.crypto_keys, &enc_name).unwrap_or_else(|| name.to_string());
+        let entry = FolderEntry {
+            id: folder_id.clone(),
+            name: decrypted_name,
+        };
+        let mut folders = self.folders.write().await;
+        folders.push(entry.clone());
+        Ok(entry)
+    }
+
+    /// Rename a folder. `name` is the current name (resolved to id). Returns
+    /// the updated `FolderEntry`.
+    pub async fn edit_folder(&self, name: &str, new_name: &str) -> Result<FolderEntry> {
+        let folder_id = self
+            .folder_id_for_name(name)
+            .ok_or_else(|| anyhow::anyhow!("folder not found: {}", name))?;
+        let enc_name = crate::crypto::encrypt_string(
+            new_name,
+            self.crypto_keys.enc_key_bytes(),
+            self.crypto_keys.mac_key_bytes(),
+        )?;
+        let client = self.write_client()?;
+        let body = serde_json::json!({ "name": enc_name });
+        let _updated = crate::api_write::rename_folder(
+            &client,
+            &self.server_url,
+            &self.access_token,
+            &folder_id,
+            &body,
+        )
+        .await
+        .context("failed to rename folder")?;
+
+        let decrypted_name =
+            decrypt_str(&self.crypto_keys, &enc_name).unwrap_or_else(|| new_name.to_string());
+        let entry = FolderEntry {
+            id: folder_id.clone(),
+            name: decrypted_name.clone(),
+        };
+        let mut folders = self.folders.write().await;
+        if let Some(f) = folders.iter_mut().find(|f| f.id == folder_id) {
+            f.name = decrypted_name;
+        }
+        Ok(entry)
+    }
+
+    /// Delete a folder by name. The server moves its entries to "No Folder".
+    /// Entries are never auto-deleted.
+    pub async fn delete_folder(&self, name: &str) -> Result<()> {
+        let folder_id = self
+            .folder_id_for_name(name)
+            .ok_or_else(|| anyhow::anyhow!("folder not found: {}", name))?;
+        let client = self.write_client()?;
+        crate::api_write::delete_folder(&client, &self.server_url, &self.access_token, &folder_id)
+            .await
+            .context("failed to delete folder")?;
+        let mut folders = self.folders.write().await;
+        folders.retain(|f| f.id != folder_id);
         Ok(())
     }
 }

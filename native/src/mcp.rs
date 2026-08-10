@@ -64,6 +64,38 @@ pub struct CipherIdParams {
     pub account: String,
 }
 
+// ── Folder tool params ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListFoldersParams {
+    account: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GetFolderIdParams {
+    account: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CreateFolderParams {
+    account: String,
+    name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EditFolderParams {
+    account: String,
+    name: String,
+    new_name: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteFolderParams {
+    account: String,
+    name: String,
+}
+
 /// Generate JSON schema for a type implementing JsonSchema as JsonObject.
 fn schema_for<T: schemars::JsonSchema>() -> Arc<JsonObject> {
     let schema = serde_json::to_value(schemars::schema_for!(T)).unwrap_or_default();
@@ -144,6 +176,31 @@ impl VaultwardenMcpServer {
                 "restore_cipher",
                 "Restore a soft-deleted (trashed) vault entry.",
                 schema_for::<CipherIdParams>(),
+            ),
+            Tool::new(
+                "list_folders",
+                "List all folders with their decrypted names.",
+                schema_for::<ListFoldersParams>(),
+            ),
+            Tool::new(
+                "get_folder_id",
+                "Resolve a folder name to its id. Errors if the folder doesn't exist.",
+                schema_for::<GetFolderIdParams>(),
+            ),
+            Tool::new(
+                "create_folder",
+                "Create a new folder with the given name.",
+                schema_for::<CreateFolderParams>(),
+            ),
+            Tool::new(
+                "edit_folder",
+                "Rename a folder. Takes the current name and a new name.",
+                schema_for::<EditFolderParams>(),
+            ),
+            Tool::new(
+                "delete_folder",
+                "Delete a folder by name. The server moves its entries to 'No Folder'; entries are never auto-deleted.",
+                schema_for::<DeleteFolderParams>(),
             ),
         ];
 
@@ -367,6 +424,100 @@ impl ServerHandler for VaultwardenMcpServer {
                 drop(guard);
                 Ok(CallToolResult::success(vec![ContentBlock::text(
                     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "list_folders" => {
+                let params: ListFoldersParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let mut results = Vec::new();
+                for (label, session) in guard.iter() {
+                    if let Some(ref a) = params.account
+                        && a != label
+                    {
+                        continue;
+                    }
+                    for folder in session.list_folders() {
+                        results.push(serde_json::json!({
+                            "account": label,
+                            "id": folder.id,
+                            "name": folder.name,
+                        }));
+                    }
+                }
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".into()),
+                )])
+                .into())
+            }
+
+            "get_folder_id" => {
+                let params: GetFolderIdParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let folder_id = session.folder_id_for_name(&params.name).ok_or_else(|| {
+                    McpError::invalid_params(format!("folder '{}' not found", params.name), None)
+                })?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "folder_id": folder_id,
+                        "name": params.name,
+                    }))
+                    .unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "create_folder" => {
+                let params: CreateFolderParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .create_folder(&params.name)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "edit_folder" => {
+                let params: EditFolderParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                let entry = session
+                    .edit_folder(&params.name, &params.new_name)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".into()),
+                )])
+                .into())
+            }
+
+            "delete_folder" => {
+                let params: DeleteFolderParams = serde_json::from_value(args_value)
+                    .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+                let guard = self.sessions.lock().await;
+                let session = find_session(&guard, &params.account)?;
+                session
+                    .delete_folder(&params.name)
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                drop(guard);
+                Ok(CallToolResult::success(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&serde_json::json!({"deleted": true}))
+                        .unwrap_or_else(|_| "{}".into()),
                 )])
                 .into())
             }

@@ -1,4 +1,4 @@
-//! Thin write client for the Bitwarden/Vaultwarden cipher REST endpoints.
+//! Thin write client for the Bitwarden/Vaultwarden cipher and folder REST endpoints.
 //!
 //! The `vaultwarden-cli` `ApiClient` exposes read endpoints only and keeps its
 //! `reqwest::Client` / `base_url` private, so create/edit/delete go through
@@ -6,12 +6,15 @@
 //! conventions and the same `bitwarden-client-version` header so Vaultwarden
 //! doesn't log a warning per write.
 //!
-//! Endpoints (all under `/api/ciphers`):
-//!   POST   /api/ciphers/{id}          create
-//!   PUT    /api/ciphers/{id}          edit (full replace)
-//!   PUT    /api/ciphers/{id}/delete   soft-delete (sets deletedDate, reversible)
-//!   PUT    /api/ciphers/{id}/restore  restore a soft-deleted cipher
-//!   DELETE /api/ciphers/{id}          hard-delete (permanent)
+//! Endpoints (all under `/api/ciphers` or `/api/folders`):
+//!   POST   /api/ciphers                  create
+//!   PUT    /api/ciphers/{id}              edit (full replace)
+//!   PUT    /api/ciphers/{id}/delete       soft-delete (sets deletedDate, reversible)
+//!   PUT    /api/ciphers/{id}/restore      restore a soft-deleted cipher
+//!   DELETE /api/ciphers/{id}              hard-delete (permanent)
+//!   POST   /api/folders                   create folder
+//!   PUT    /api/folders/{id}              rename folder
+//!   DELETE /api/folders/{id}              delete folder
 
 use anyhow::{Context, Result, anyhow};
 use reqwest::{Client, Response};
@@ -187,5 +190,67 @@ pub async fn delete_cipher(
         .await
         .context("failed to send hard-delete request")?;
     ensure_success(resp, "hard-delete cipher").await?;
+    Ok(())
+}
+
+/// `POST /api/folders` — create a folder. Returns the created folder JSON.
+pub async fn create_folder(
+    client: &Client,
+    base_url: &str,
+    access_token: &str,
+    body: &Value,
+) -> Result<Value> {
+    let url = format!("{}/api/folders", base_url.trim_end_matches('/'));
+    send_json(
+        client,
+        reqwest::Method::POST,
+        &url,
+        access_token,
+        body,
+        "create folder",
+    )
+    .await
+}
+
+/// `PUT /api/folders/{id}` — rename a folder. Returns the updated folder JSON.
+pub async fn rename_folder(
+    client: &Client,
+    base_url: &str,
+    access_token: &str,
+    folder_id: &str,
+    body: &Value,
+) -> Result<Value> {
+    let url = format!("{}/api/folders/{folder_id}", base_url.trim_end_matches('/'));
+    send_json(
+        client,
+        reqwest::Method::PUT,
+        &url,
+        access_token,
+        body,
+        "rename folder",
+    )
+    .await
+}
+
+/// `DELETE /api/folders/{id}` — delete a folder. Returns `Ok(())`.
+/// The server moves the folder's entries to "No Folder".
+pub async fn delete_folder(
+    client: &Client,
+    base_url: &str,
+    access_token: &str,
+    folder_id: &str,
+) -> Result<()> {
+    let url = format!("{}/api/folders/{folder_id}", base_url.trim_end_matches('/'));
+    let resp = client
+        .request(reqwest::Method::DELETE, &url)
+        .bearer_auth(access_token)
+        .header(
+            "bitwarden-client-version",
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .send()
+        .await
+        .context("failed to send folder delete request")?;
+    ensure_success(resp, "delete folder").await?;
     Ok(())
 }
