@@ -6,11 +6,11 @@ description: Use when the user wants to access, look up, create, edit, or manage
 # Using vaultwarden-mcp
 
 `vaultwarden-mcp` exposes a Vaultwarden (Bitwarden-compatible) vault to AI
-agents as nine MCP tools. You don't run the binary — the MCP host does. Your
+agents as fourteen MCP tools. You don't run the binary — the MCP host does. Your
 job is to call the tools with the right arguments. This file is the lean
 overview; details live in `references/` and are read on demand.
 
-## The nine tools
+## The fourteen tools
 
 **Read** (safe, idempotent):
 
@@ -30,6 +30,16 @@ overview; details live in `references/` and are read on demand.
 | `soft_delete_cipher` | move to trash (reversible via restore) | required |
 | `restore_cipher` | restore a trashed entry | required |
 | `delete_cipher` | permanently destroy (irreversible) | required |
+
+**Folders** (organize entries):
+
+| Tool | Purpose | `account` |
+|------|---------|-----------|
+| `list_folders` | list folder names in a vault | optional |
+| `get_folder_id` | resolve a folder name to its id | required |
+| `create_folder` | create a folder | required |
+| `edit_folder` | rename a folder | required |
+| `delete_folder` | delete a folder (entries move to No Folder) | required |
 
 ## The two rules that trip up agents
 

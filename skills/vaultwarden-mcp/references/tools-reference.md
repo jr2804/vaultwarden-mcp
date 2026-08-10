@@ -178,3 +178,61 @@ Restore a trashed entry to the active vault.
 ```json
 { "cipher_id": "...", "deleted": true }
 ```
+
+## Folder tools
+
+### `list_folders`
+
+List folders in a vault by name. No `account` fans across all accounts.
+
+| Param | Type | Required |
+|-------|------|----------|
+| `account` | string | no |
+
+**Returns:** an array of `{ account, id, name }`.
+
+### `get_folder_id`
+
+Resolve a folder name to its internal id. Errors if the name doesn't exist.
+
+| Param | Type | Required |
+|-------|------|----------|
+| `account` | string | yes |
+| `name` | string | yes |
+
+**Returns:** `{ folder_id, name }`.
+
+### `create_folder`
+
+Create a folder by name.
+
+| Param | Type | Required |
+|-------|------|----------|
+| `account` | string | yes |
+| `name` | string | yes |
+
+**Returns:** `{ id, name }`.
+
+### `edit_folder`
+
+Rename a folder.
+
+| Param | Type | Required |
+|-------|------|----------|
+| `account` | string | yes |
+| `name` | string | yes |
+| `new_name` | string | yes |
+
+**Returns:** `{ id, name }`.
+
+### `delete_folder`
+
+Delete a folder. Vaultwarden moves its entries to **No Folder**; password
+entries are not deleted.
+
+| Param | Type | Required |
+|-------|------|----------|
+| `account` | string | yes |
+| `name` | string | yes |
+
+**Returns:** `{ deleted: true }`.

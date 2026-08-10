@@ -3,7 +3,9 @@
 
 Exercises every write tool against a live vaultwarden-mcp server:
 create_cipher → search → edit_cipher → soft_delete_cipher → restore_cipher
-→ delete_cipher → final search (empty).
+→ delete_cipher → final search (empty), then a folder round-trip
+(create_folder → get_folder_id → create-in-folder → move-to-No-Folder
+→ list_folders → edit_folder → delete_folder).
 
 Verifies that:
   - the server accepts writes and returns decrypted entries
@@ -11,7 +13,8 @@ Verifies that:
   - edit overlay semantics work (change a field, leave others)
   - soft-delete + restore round-trips
   - hard-delete removes the entry and the final search is empty
-  - the test entry is fully cleaned up (no leftover state)
+  - folders: create/resolve/move/rename/delete round-trip cleanly
+  - the test entry and folder are fully cleaned up (no leftover state)
 
 Usage:
   # secrets must be in the environment (export the VWMCP_* vars your
@@ -143,9 +146,57 @@ def main():
     print(f"\n[8] final search (should be [])\n{final[:200]}")
     assert json.loads(final) == [], "test entry was not cleaned up!"
 
+    # ── Folder round-trip ────────────────────────────────────────────────────
+    fname = f"vwmcp-folder-{args.account}"
+
+    # 9. create_folder
+    r = call("create_folder", {**acc, "name": fname}, 9)
+    print(f"\n[9] create_folder\n{text(r)[:200]}")
+    assert r and not r.get("error"), "create_folder failed"
+
+    # 10. get_folder_id
+    r = call("get_folder_id", {**acc, "name": fname}, 10)
+    print(f"\n[10] get_folder_id\n{text(r)[:200]}")
+    fid = json.loads(text(r)).get("folder_id")
+    assert fid, "get_folder_id returned no id"
+
+    # 11. create_cipher into the folder
+    r = call("create_cipher", {**acc, "cipher_type": "note", "name": name,
+                                "notes": "folder-test", "folder": fname}, 11)
+    print(f"\n[11] create_cipher with folder\n{text(r)[:300]}")
+    assert r and not r.get("error"), "create with folder failed"
+    fcid = json.loads(text(r)).get("id")
+    assert fcid, "create returned no id"
+
+    # 12. edit_cipher: move to No Folder (folder: null)
+    r = call("edit_cipher", {**acc, "cipher_id": fcid, "folder": None}, 12)
+    print(f"\n[12] edit_cipher folder=null (No Folder)\n{text(r)[:200]}")
+    assert r and not r.get("error"), "edit folder=null failed"
+
+    # 13. list_folders (should contain fname)
+    r = call("list_folders", {"account": args.account}, 13)
+    folders = json.loads(text(r))
+    print(f"\n[13] list_folders\n{text(r)[:300]}")
+    assert any(f.get("name") == fname for f in folders), "folder missing from list"
+
+    # 14. edit_folder (rename)
+    r = call("edit_folder", {**acc, "name": fname, "new_name": fname + "-renamed"}, 14)
+    print(f"\n[14] edit_folder (rename)\n{text(r)[:200]}")
+    assert r and not r.get("error"), "edit_folder failed"
+
+    # 15. delete_folder
+    r = call("delete_folder", {**acc, "name": fname + "-renamed"}, 15)
+    print(f"\n[15] delete_folder\n{text(r)[:200]}")
+    assert r and not r.get("error"), "delete_folder failed"
+
+    # 16. hard-delete the folder-test cipher to leave the vault clean
+    r = call("delete_cipher", {**acc, "cipher_id": fcid}, 16)
+    print(f"\n[16] delete_cipher (cleanup)\n{text(r)[:200]}")
+    assert r and not r.get("error"), "cleanup delete failed"
+
     proc.stdin.close()
     proc.wait(timeout=3)
-    print(f"\n+ Round-trip complete. Test entry '{name}' created and cleaned up.")
+    print(f"\n+ Round-trip complete. Test entry '{name}' and folder '{fname}' cleaned up.")
 
 
 if __name__ == "__main__":

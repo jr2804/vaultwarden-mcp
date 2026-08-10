@@ -138,6 +138,30 @@ The server keeps a decrypted copy of the vault in memory after startup. Reads
 app) since the server started. Writes update the cache immediately, so you
 never need `sync` after a write to see your own change.
 
+## Folders: reference by name, auto-created on write
+
+Folders are referenced **by name** — the id↔name mapping is internal and you
+almost never need it. Key behaviors:
+
+- `list_folders` returns the folder names in a vault (no `account` fans across
+  all accounts).
+- `create_cipher` / `edit_cipher` accept an optional `folder` **name**. If the
+  folder doesn't exist, it is **auto-created** on the server, so you can store
+  a new entry into a folder that doesn't exist yet in one call.
+- `edit_cipher`'s `folder` is three-state, like every other field:
+  - omit → keep the current folder
+  - `"Work"` → move to that folder (auto-creates it if missing)
+  - `null` → move to **No Folder**
+- `delete_folder` removes the folder; the server moves its entries to **No
+  Folder** (password entries are **not** deleted).
+
+Example — put a new entry in a folder:
+
+```json
+{ "account": "human", "name": "VPN", "type": "login",
+  "username": "me", "password": "s3cret", "folder": "Network" }
+```
+
 ## Putting it together: a rotation workflow
 
 User: "rotate my GitHub password to this new value."
