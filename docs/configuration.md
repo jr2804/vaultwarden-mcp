@@ -130,6 +130,12 @@ export VWMCP_AGENT_PASSWORD="..."
 vaultwarden-mcp serve --transport stdio
 ```
 
+Or with a custom manifest location:
+
+```bash
+vaultwarden-mcp serve --secretspec-manifest /path/to/secretspec.toml
+```
+
 Or with a `.env` file:
 
 ```bash
