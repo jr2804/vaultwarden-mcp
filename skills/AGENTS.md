@@ -11,7 +11,7 @@ progressive-disclosure `references/`, `assets/`, and `scripts/`.
 
 | Skill | Purpose | Read when |
 |-------|---------|-----------|
-| `vaultwarden-mcp/` | How to call the 9 vaultwarden-mcp MCP tools (read + write) | Working on or using the vault tools |
+| `vaultwarden-mcp/` | How to call the 14 vaultwarden-mcp MCP tools (read + write + folder) | Working on or using the vault tools |
 
 ## Local Contracts
 
