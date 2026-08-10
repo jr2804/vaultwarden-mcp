@@ -15,6 +15,10 @@ and Tier 2 (wiremock integration), run with
 
 - `tests/test_template_validation.py` — structural lint: pyproject.toml,
   Cargo.toml shape, CalVer, CI uses cargo (no maturin)
+- `.github/workflows/` — CI shape: `auto-release.yml` (bump CalVer + dispatch
+  release on push to main, unless `[skip-release]` in the head commit) and
+  `release.yml` (build 4-platform binaries + publish GitHub release on a
+  `2026.*` tag). Release process docs: `docs/contributing.md`
 
 ## Local Contracts
 

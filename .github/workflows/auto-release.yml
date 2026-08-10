@@ -1,0 +1,82 @@
+name: Auto Release
+
+# Bump the CalVer version and cut a release on every push to main — unless the
+# last commit message carries the magic marker `[skip-release]` (append it to a
+# commit when you do NOT want a version bump / new release).
+#
+# Pushes made with GITHUB_TOKEN do not trigger other workflows, so this
+# workflow cannot rely on its own tag push to fire `release.yml`. Instead it
+# pushes the bump commit + tag, then explicitly dispatches `release.yml` on
+# that tag (`gh workflow run ... --ref <tag>`), which builds the binaries and
+# creates the GitHub release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write  # push bump commit + tag
+  actions: write   # dispatch release.yml
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip-release]')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need all tags to compute the next CalVer version
+
+      - name: Compute next version
+        id: version
+        run: |
+          set -euo pipefail
+          ym="$(date -u +%Y.%-m)"                      # e.g. 2026.8 (no zero-pad)
+          latest="$(git tag --sort=-v:refname | head -1 || true)"
+          if [[ -n "$latest" && "$latest" == "$ym."* ]]; then
+            patch="${latest##*.}"
+            next="$ym.$((patch + 1))"
+          else
+            next="$ym.0"
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version in Cargo.toml + Cargo.lock
+        run: |
+          set -euo pipefail
+          next="${{ steps.version.outputs.version }}"
+          sed -i "s/^version = \".*\"/version = \"$next\"/" native/Cargo.toml
+          # Cargo.lock: bump only the vaultwarden-mcp [[package]] version line.
+          awk -v ver="$next" '
+            /^name = "vaultwarden-mcp"/ { found=1; print; next }
+            found && /^version = / { sub(/version = ".*"/, "version = \"" ver "\""); found=0 }
+            { print }
+          ' native/Cargo.lock > native/Cargo.lock.new && mv native/Cargo.lock.new native/Cargo.lock
+          grep -n '^version' native/Cargo.toml | head -1
+          grep -A1 'name = "vaultwarden-mcp"' native/Cargo.lock | grep '^version'
+
+      - name: Commit + push bump, create + push tag
+        run: |
+          set -euo pipefail
+          next="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native/Cargo.toml native/Cargo.lock
+          git commit -m "chore(release): bump version to $next [skip-release]"
+          git push origin main
+          git tag "$next"
+          git push origin "$next"
+
+      - name: Dispatch release build on the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          next="${{ steps.version.outputs.version }}"
+          gh workflow run release.yml --ref "$next"
+          echo "dispatched release.yml on ref $next"

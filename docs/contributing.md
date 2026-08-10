@@ -69,9 +69,19 @@ Git tags matching `2026.*` (e.g. `2026.8.1`) trigger automated binary releases v
 
 ## Release Process
 
-Releases are automated. To cut a new release:
+Releases are fully automated:
 
-1. Bump the version in `native/Cargo.toml`
+1. **Push to `main`** → the `auto-release.yml` workflow bumps the CalVer patch
+   version in `native/Cargo.toml` + `Cargo.lock`, commits it, creates the
+   `YYYY.M.N` tag, and dispatches `release.yml` to build binaries + publish the
+   GitHub release. Nothing to do manually.
+2. **Skip a release** → append the magic marker `[skip-release]` to the last
+   commit message (e.g. `fix: typo [skip-release]`). The workflow checks the
+   head commit of the push and exits early — no bump, no tag, no release.
+
+Manual fallback (still supported):
+
+1. Bump the version in `native/Cargo.toml` (and `native/Cargo.lock`)
 2. Commit and push
 3. Create and push a matching git tag:
 

@@ -104,7 +104,9 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Runs for a tag push (manual) or a workflow_dispatch on a tag
+    # (auto-release.yml dispatches this workflow on the new version tag).
+    if: startsWith(github.ref, 'refs/tags/')
 
     steps:
       - uses: actions/checkout@v4
