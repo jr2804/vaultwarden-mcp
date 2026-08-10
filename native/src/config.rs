@@ -152,13 +152,14 @@ pub fn resolve_accounts(
     file: ConfigFile,
     secretspec_provider: &str,
     secretspec_profile: &str,
+    secretspec_manifest: Option<&Path>,
 ) -> Result<Vec<AccountConfigFile>> {
     // Resolve the secretspec manifest once (not per-account) if any field uses
     // a secret:// reference. Secrets::load() walks the cwd and parents for
     // secretspec.toml and honors SECRETSPEC_MANIFEST.
     let secrets = if has_secret_uris(&file) {
         Some(crate::secrets::resolve(
-            None,
+            secretspec_manifest,
             secretspec_provider,
             secretspec_profile,
         )?)
@@ -416,7 +417,7 @@ mod tests {
             env::set_var("VAULTWARDEN_ACCOUNT_P_PASSWORD", "env_pw");
             env::set_var("VAULTWARDEN_ACCOUNT_P_CLIENT_ID", "env_id");
         }
-        let result = resolve_accounts(cfg, "env", "default").unwrap();
+        let result = resolve_accounts(cfg, "env", "default", None).unwrap();
         unsafe {
             env::remove_var("VAULTWARDEN_ACCOUNT_P_PASSWORD");
             env::remove_var("VAULTWARDEN_ACCOUNT_P_CLIENT_ID");
@@ -556,7 +557,7 @@ mod tests {
             env::set_var("VAULTWARDEN_PASSWORD", "fallback.pw");
         }
         let cfg = ConfigFile::default();
-        let result = resolve_accounts(cfg, "env", "default").unwrap();
+        let result = resolve_accounts(cfg, "env", "default", None).unwrap();
         unsafe {
             env::remove_var("VAULTWARDEN_SERVER");
             env::remove_var("VAULTWARDEN_CLIENT_ID");
@@ -715,7 +716,7 @@ mod tests {
         let toml = "\n            [[accounts]]\n            label = \"p\"\n            server = \"https://x\"\n            client_id = \"id\"\n            client_secret = \"plaintext-secret\"\n            password = \"plaintext-pw\"\n        ";
         let cfg: ConfigFile = toml::from_str(toml).unwrap();
         // resolve_accounts with no secret:// refs must not touch secretspec.
-        let accounts = resolve_accounts(cfg, "env", "default").expect("resolve plaintext");
+        let accounts = resolve_accounts(cfg, "env", "default", None).expect("resolve plaintext");
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].client_secret, "plaintext-secret");
         assert_eq!(accounts[0].password, "plaintext-pw");
@@ -738,5 +739,23 @@ mod tests {
             msg.contains("missing") || msg.contains("VWMCP_TEST_ABSENT"),
             "error should name the missing secret, got: {msg}"
         );
+    }
+
+    #[test]
+    fn resolve_manifest_override() {
+        let dir = write_temp_manifest(
+            "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_MANIFEST = { description = \"pw\" }\n",
+        );
+        let manifest = dir.path().join("secretspec.toml");
+        let toml = "\n            [[accounts]]\n            label = \"p\"\n            server = \"https://x\"\n            client_id = \"id\"\n            client_secret = \"secret://VWMCP_TEST_MANIFEST\"\n            password = \"sec\"\n        ";
+        let cfg: ConfigFile = toml::from_str(toml).unwrap();
+        unsafe {
+            env::set_var("VWMCP_TEST_MANIFEST", "manifest-pass");
+        }
+        let accounts = resolve_accounts(cfg, "env", "default", Some(&manifest)).unwrap();
+        unsafe {
+            env::remove_var("VWMCP_TEST_MANIFEST");
+        }
+        assert_eq!(accounts[0].client_secret, "manifest-pass");
     }
 }

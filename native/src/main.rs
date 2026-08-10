@@ -8,7 +8,8 @@
 //! Configuration is loaded from a TOML file (--config) and merged with
 //! environment variables. Env vars win per-field. Secret references in the
 //! TOML use the `secret://NAME` syntax and are resolved against the secretspec
-//! runtime (provider via `--secretspec-provider`, default `env`).
+//! runtime (provider via `--secretspec-provider`, default `env`; manifest via
+//! `--secretspec-manifest` or `SECRETSPEC_MANIFEST`).
 //! See `.agents/plans/01-config.md` for the full design.
 //!
 //! For env-var-only mode, set: VAULTWARDEN_SERVER, VAULTWARDEN_CLIENT_ID,
@@ -60,6 +61,10 @@ enum Commands {
         /// bw (Bitwarden CLI). See https://secretspec.dev/providers/
         #[arg(long, default_value = "env")]
         secretspec_provider: String,
+        /// Path to a secretspec.toml manifest file. Defaults to SECRETSPEC_MANIFEST
+        /// env var or auto-discovery (walking cwd and parent directories).
+        #[arg(long, env = "SECRETSPEC_MANIFEST")]
+        secretspec_manifest: Option<PathBuf>,
     },
     /// Print the effective config (after env-var merge) and exit.
     PrintConfig {
@@ -72,6 +77,9 @@ enum Commands {
         /// secretspec provider (default: "env").
         #[arg(long, default_value = "env")]
         secretspec_provider: String,
+        /// Path to a secretspec.toml manifest file.
+        #[arg(long, env = "SECRETSPEC_MANIFEST")]
+        secretspec_manifest: Option<PathBuf>,
     },
 }
 
@@ -90,9 +98,14 @@ async fn main() -> anyhow::Result<()> {
             config,
             secretspec_profile,
             secretspec_provider,
+            secretspec_manifest,
         } => {
-            let account_configs =
-                load_accounts(config.as_deref(), secretspec_provider, secretspec_profile)?;
+            let account_configs = load_accounts(
+                config.as_deref(),
+                secretspec_provider,
+                secretspec_profile,
+                secretspec_manifest.as_deref(),
+            )?;
             let server = VaultwardenMcpServer::new(account_configs).await?;
             let n = server.sessions_count().await;
             tracing::info!("Starting vaultwarden-mcp with {} account(s)", n);
@@ -107,9 +120,14 @@ async fn main() -> anyhow::Result<()> {
             config,
             secretspec_profile,
             secretspec_provider,
+            secretspec_manifest,
         } => {
-            let accounts =
-                load_accounts(config.as_deref(), secretspec_provider, secretspec_profile)?;
+            let accounts = load_accounts(
+                config.as_deref(),
+                secretspec_provider,
+                secretspec_profile,
+                secretspec_manifest.as_deref(),
+            )?;
             println!("vaultwarden-mcp — effective config:");
             for a in &accounts {
                 println!("  [{}]", a.label);
@@ -166,10 +184,16 @@ fn load_accounts(
     config_path: Option<&std::path::Path>,
     secretspec_provider: &str,
     secretspec_profile: &str,
+    secretspec_manifest: Option<&std::path::Path>,
 ) -> anyhow::Result<Vec<AccountConfig>> {
     let file: ConfigFile = config::load(config_path)?;
 
-    let resolved = config::resolve_accounts(file, secretspec_provider, secretspec_profile)?;
+    let resolved = config::resolve_accounts(
+        file,
+        secretspec_provider,
+        secretspec_profile,
+        secretspec_manifest,
+    )?;
     Ok(resolved.into_iter().map(to_mcp_account).collect())
 }
 
