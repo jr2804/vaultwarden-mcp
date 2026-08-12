@@ -150,7 +150,10 @@ impl VaultwardenMcpServer {
             Tool::new(
                 "list_accounts",
                 "List all configured vaultwarden accounts.",
-                Arc::new(Map::new()),
+                Arc::new(Map::from_iter([
+                    ("type".to_string(), Value::String("object".to_string())),
+                    ("properties".to_string(), Value::Object(Map::new())),
+                ])),
             ),
             Tool::new(
                 "create_cipher",
