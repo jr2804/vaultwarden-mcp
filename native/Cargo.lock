@@ -4825,7 +4825,7 @@ dependencies = [
 
 [[package]]
 name = "vaultwarden-mcp"
-version = "2026.8.4"
+version = "2026.8.5"
 dependencies = [
  "aes 0.9.2",
  "anyhow",
