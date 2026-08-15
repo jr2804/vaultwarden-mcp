@@ -162,7 +162,7 @@ impl VaultwardenMcpServer {
             ),
             Tool::new(
                 "edit_cipher",
-                "Edit an existing vault entry. Every field is optional; omit a field to leave it unchanged, or pass null to clear it. cipher_type cannot change.",
+                "Edit an existing vault entry. Works on all cipher types (login, note, card, identity, ssh). Every field is optional; omit a field to leave it unchanged, or pass null to clear it. cipher_type cannot change. Username/password/uri/totp only apply to login entries.",
                 schema_for::<EditCipherParams>(),
             ),
             Tool::new(

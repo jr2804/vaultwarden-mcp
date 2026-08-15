@@ -121,3 +121,33 @@ pub fn login_cipher_json(
         },
     })
 }
+
+/// Build the JSON for an encrypted **card** cipher (`type: 3`) — for mock
+/// `/api/sync` bodies and `/api/ciphers/{id}` GET/PUT responses. Card fields
+/// are encrypted like every other string field; `notes` is optional.
+pub fn card_cipher_json(
+    keys: &CryptoKeys,
+    id: &str,
+    name: &str,
+    cardholder: &str,
+    number: &str,
+    notes: Option<&str>,
+) -> serde_json::Value {
+    let mut card = serde_json::json!({
+        "id": id,
+        "type": 3,
+        "name": encrypt_str(name, keys),
+        "card": {
+            "cardholderName": encrypt_str(cardholder, keys),
+            "brand": encrypt_str("Visa", keys),
+            "number": encrypt_str(number, keys),
+            "expMonth": encrypt_str("12", keys),
+            "expYear": encrypt_str("2030", keys),
+            "code": encrypt_str("123", keys),
+        },
+    });
+    if let Some(n) = notes {
+        card["notes"] = serde_json::Value::String(encrypt_str(n, keys));
+    }
+    card
+}
