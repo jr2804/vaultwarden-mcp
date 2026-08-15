@@ -44,9 +44,11 @@ for writes.
   unresolvable reference fails the load with a clear error.
 - Write-path contract: [.agents/plans/02-write-and-secretspec.md](../.agents/plans/02-write-and-secretspec.md) —
   Option A (keep `vaultwarden-cli` dep; local encrypt + own write HTTP client).
-  v1 supports login + secure-note create/edit; card/identity/ssh are read-only.
-  Edit is partial-overlay (`None` = unchanged, `Some(None)` = clear). Hard-delete
-  is permanent; soft-delete + restore round-trip via `deletedDate`.
+  `create_cipher` supports login + secure-note; `edit_cipher` works on **all**
+  types (login, note, card, identity, ssh) by overlaying the raw encrypted
+  cipher (type-specific data preserved verbatim). Edit is partial-overlay
+  (`None` = unchanged, `Some(None)` = clear). Hard-delete is permanent;
+  soft-delete + restore round-trip via `deletedDate`.
 - Folder contract: folders are referenced **by name** in the MCP surface; id↔name
   mapping is internal. `create_cipher`/`edit_cipher` accept an optional `folder`;
   a name that doesn't exist is auto-created via `POST /api/folders` (write-locked).
