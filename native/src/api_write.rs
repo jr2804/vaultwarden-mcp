@@ -103,6 +103,35 @@ pub async fn create_cipher(
     .await
 }
 
+/// `GET /api/ciphers/{id}` — fetch a single cipher's raw (encrypted) JSON.
+///
+/// `edit_cipher` uses this before its full-replace PUT so type-specific data
+/// (card, identity, ssh, secure-note) can be preserved verbatim instead of
+/// being rebuilt from the decrypted `CipherEntry` (which only carries
+/// login/note/ssh fields).
+pub async fn get_cipher_raw(
+    client: &Client,
+    base_url: &str,
+    access_token: &str,
+    cipher_id: &str,
+) -> Result<Value> {
+    let url = format!("{}/api/ciphers/{cipher_id}", base_url.trim_end_matches('/'));
+    let resp = client
+        .request(reqwest::Method::GET, &url)
+        .bearer_auth(access_token)
+        .header(
+            "bitwarden-client-version",
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .send()
+        .await
+        .with_context(|| format!("failed to send get cipher request for {cipher_id}"))?;
+    let resp = ensure_success(resp, "get cipher").await?;
+    resp.json::<Value>()
+        .await
+        .with_context(|| format!("failed to parse get cipher response for {cipher_id}"))
+}
+
 /// `PUT /api/ciphers/{id}` — full-replace edit. Returns the updated cipher JSON.
 pub async fn edit_cipher(
     client: &Client,

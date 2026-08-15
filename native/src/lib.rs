@@ -468,8 +468,9 @@ impl VaultwardenSession {
 // `api_write` client. Every string field is individually encrypted with the
 // session symmetric key; the body shape matches the Bitwarden CipherRequest.
 
-/// Cipher type accepted by the write tools. v1 supports login + secure note;
-// card/identity/ssh remain read-only (consistent with the read path).
+/// Cipher type accepted by `create_cipher`. v1 create supports login + secure
+/// note; `edit_cipher` accepts **all** types (login, note, card, identity,
+/// ssh) because it overlays the raw cipher instead of rebuilding it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum WriteCipherType {
@@ -487,11 +488,24 @@ impl WriteCipherType {
     }
 }
 
+/// Map the read-path cipher-type string ("login", "note", "card", "identity",
+/// "ssh") to the numeric value the Bitwarden API expects in the `type` field.
+/// Unknown types fall back to login (1) for backward compatibility.
+fn cipher_type_u8(cipher_type: &str) -> u8 {
+    match cipher_type {
+        "note" => 2,
+        "card" => 3,
+        "identity" => 4,
+        "ssh" => 5,
+        _ => 1, // "login" (and any unknown/legacy value)
+    }
+}
+
 /// Plaintext field input for create. Every field except `name` and `cipher_type`
 /// is optional and is omitted from the request body when `None`.
 #[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
 pub struct CipherInput {
-    /// Cipher type: "login" or "note".
+    /// Cipher type: "login" or "note" (create v1 scope).
     pub cipher_type: WriteCipherType,
     /// Display name (required).
     pub name: String,
@@ -727,56 +741,51 @@ impl VaultwardenSession {
 
     /// Edit an existing cipher. `None` on every field means "unchanged"; the
     /// `Option<Option<T>>` shape lets a caller explicitly clear a field by
-    /// passing `Some(None)`. PUT is a full replace, so we fetch the current
-    /// cipher, overlay the provided fields, and re-encrypt the whole body.
+    /// passing `Some(None)`.
+    ///
+    /// PUT is a full replace, so we fetch the raw (encrypted) cipher JSON from
+    /// the server and overlay only the edited fields. Type-specific data
+    /// (card, identity, ssh, secure-note) passes through verbatim, which makes
+    /// editing work for every cipher type — not just login/note.
     pub async fn edit_cipher(&self, cipher_id: &str, edit: CipherEdit) -> Result<CipherEntry> {
-        // 1. Fetch the current plaintext state.
-        let current = self.get_cipher(cipher_id).await?;
+        let client = self.write_client()?;
 
-        // 2. Overlay edits onto the current values.
-        let input = CipherInput {
-            cipher_type: match current.cipher_type.as_str() {
-                "note" => WriteCipherType::Note,
-                _ => WriteCipherType::Login,
-            },
-            name: edit.name.unwrap_or(current.name),
-            username: overlay_opt(edit.username, current.username),
-            password: overlay_opt(edit.password, current.password),
-            uri: overlay_opt(edit.uri, current.uri),
-            totp: overlay_opt(edit.totp, current.totp),
-            notes: overlay_opt(edit.notes, current.notes),
-            fields: edit.fields.map(|fs| {
-                fs.into_iter()
-                    .map(|f| FieldInput {
-                        name: f.name,
-                        value: f.value,
-                        field_type: f.field_type,
-                    })
-                    .collect()
-            }),
-            folder: current.folder.clone(),
-        };
+        // 1. Fetch the current cipher verbatim (fields still encrypted). This
+        //    preserves the type discriminator and all type-specific data.
+        let mut body = crate::api_write::get_cipher_raw(
+            &client,
+            &self.server_url,
+            &self.access_token,
+            cipher_id,
+        )
+        .await
+        .with_context(|| format!("failed to fetch cipher '{cipher_id}' for edit"))?;
 
-        // 3. Resolve folder for the edit body: None = unchanged, Some(None) =
-        //    clear, Some(Some(name)) = move/resolve.
-        //    Handle here because edit needs explicit null in the body.
-        let folder_id: Option<Option<String>> = match &edit.folder {
-            None => None,
-            Some(None) => Some(None),
+        let cipher_type = body.get("type").and_then(|v| v.as_u64()).unwrap_or(1) as u8;
+
+        // 2. Overlay plaintext edits, re-encrypting only changed values.
+        //    Name: Some(name) = set, None = keep.
+        if let Some(name) = edit.name.as_deref() {
+            body["name"] = serde_json::Value::String(self.enc_opt(Some(name))?.unwrap());
+        }
+
+        //    Notes: Some(Some) = set, Some(None) = clear, None = keep.
+        match &edit.notes {
+            Some(Some(notes)) => {
+                body["notes"] = serde_json::Value::String(self.enc_opt(Some(notes))?.unwrap());
+            }
+            Some(None) => {
+                body["notes"] = serde_json::Value::Null;
+            }
+            None => {}
+        }
+
+        //    Folder: Some(Some(name)) = move (auto-create), Some(None) = clear,
+        //    None = keep. folderId is plaintext on the wire (not encrypted).
+        match &edit.folder {
             Some(Some(name)) => {
                 let fid = self.ensure_folder_id(name).await?;
-                Some(Some(fid))
-            }
-        };
-
-        // 4. Build the full encrypted body and PUT it.
-        let client = self.write_client()?;
-        let mut body = self.build_create_body(&input)?;
-
-        // Inject folderId after body build: null = clear, id = set, omit = keep.
-        match &folder_id {
-            Some(Some(fid)) => {
-                body["folderId"] = serde_json::Value::String(fid.clone());
+                body["folderId"] = serde_json::Value::String(fid);
             }
             Some(None) => {
                 body["folderId"] = serde_json::Value::Null;
@@ -784,6 +793,47 @@ impl VaultwardenSession {
             None => {}
         }
 
+        //    Login-only fields apply to login ciphers only; for other types
+        //    there is no `login` object to edit, so they are ignored.
+        if cipher_type == 1 {
+            for (key, value) in [
+                ("username", &edit.username),
+                ("password", &edit.password),
+                ("totp", &edit.totp),
+            ] {
+                match value {
+                    Some(Some(v)) => {
+                        body["login"][key] =
+                            serde_json::Value::String(self.enc_opt(Some(v))?.unwrap());
+                    }
+                    Some(None) => {
+                        body["login"][key] = serde_json::Value::Null;
+                    }
+                    None => {}
+                }
+            }
+            match &edit.uri {
+                Some(Some(uri)) => {
+                    let enc_uri = crate::crypto::encrypt_string(
+                        uri,
+                        self.crypto_keys.enc_key_bytes(),
+                        self.crypto_keys.mac_key_bytes(),
+                    )?;
+                    body["login"]["uris"] = serde_json::json!([{ "uri": enc_uri, "match": null }]);
+                }
+                Some(None) => {
+                    body["login"]["uris"] = serde_json::Value::Null;
+                }
+                None => {}
+            }
+        }
+
+        //    Custom fields: Some = replace the whole list, None = keep.
+        if let Some(fields) = &edit.fields {
+            body["fields"] = serde_json::Value::Array(self.encrypt_fields(fields)?);
+        }
+
+        // 3. Full-replace PUT with the merged body.
         let updated = crate::api_write::edit_cipher(
             &client,
             &self.server_url,
@@ -802,10 +852,7 @@ impl VaultwardenSession {
         // The /delete endpoint expects the current cipher body (type + name).
         let current = self.get_cipher(cipher_id).await?;
         let body = serde_json::json!({
-            "type": match current.cipher_type.as_str() {
-                "note" => 2u8,
-                _ => 1u8,
-            },
+            "type": cipher_type_u8(&current.cipher_type),
             "name": crate::crypto::encrypt_string(
                 &current.name,
                 self.crypto_keys.enc_key_bytes(),
@@ -832,10 +879,7 @@ impl VaultwardenSession {
         let current = self.get_cipher(cipher_id).await.ok();
         let body = match current {
             Some(c) => serde_json::json!({
-                "type": match c.cipher_type.as_str() {
-                    "note" => 2u8,
-                    _ => 1u8,
-                },
+                "type": cipher_type_u8(&c.cipher_type),
                 "name": crate::crypto::encrypt_string(
                     &c.name,
                     self.crypto_keys.enc_key_bytes(),
@@ -945,14 +989,5 @@ impl VaultwardenSession {
         let mut folders = self.folders.write().await;
         folders.retain(|f| f.id != folder_id);
         Ok(())
-    }
-}
-
-/// Apply an edit overlay: `None` (not provided in the edit) keeps the current
-/// value; `Some(new)` replaces it; `Some(None)` clears it.
-fn overlay_opt(edit: Option<Option<String>>, current: Option<String>) -> Option<String> {
-    match edit {
-        None => current,
-        Some(new) => new,
     }
 }
