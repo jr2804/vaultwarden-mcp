@@ -19,6 +19,36 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
+/// Read-only environment accessor.
+///
+/// Production code reads the real process environment ([`ProcessEnv`]); tests
+/// inject an in-memory map ([`MapEnv`]) so parallel test threads never race on
+/// global env vars. `std::env::set_var` is process-global and not thread-safe,
+/// so config code must never mutate it — it only reads through this trait.
+pub trait EnvSource {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Reads from the real process environment.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessEnv;
+
+impl EnvSource for ProcessEnv {
+    fn get(&self, key: &str) -> Option<String> {
+        env::var(key).ok()
+    }
+}
+
+/// In-memory environment for tests and deterministic callers.
+#[derive(Debug, Clone, Default)]
+pub struct MapEnv(pub BTreeMap<String, String>);
+
+impl EnvSource for MapEnv {
+    fn get(&self, key: &str) -> Option<String> {
+        self.0.get(key).cloned()
+    }
+}
+
 /// Config-file structure on disk.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,16 +118,24 @@ impl AccountConfigFile {
 
 /// Discover the config file path.
 ///
-/// Order: explicit override → `./vaultwarden-mcp.toml` → `~/.config/vaultwarden-mcp/config.toml`.
-pub fn discover_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
+/// Order: explicit override → `<cwd>/vaultwarden-mcp.toml` →
+/// `~/.config/vaultwarden-mcp/config.toml`.
+///
+/// `cwd` and `env` are injected so tests never mutate process-global state
+/// (`set_current_dir` / `env::set_var`) — see [`EnvSource`].
+pub fn discover_config_path(
+    explicit: Option<&Path>,
+    cwd: &Path,
+    env: &dyn EnvSource,
+) -> Option<PathBuf> {
     if let Some(p) = explicit {
         return Some(p.to_path_buf());
     }
-    let cwd = PathBuf::from("vaultwarden-mcp.toml");
-    if cwd.exists() {
-        return Some(cwd);
+    let cwd_file = cwd.join("vaultwarden-mcp.toml");
+    if cwd_file.exists() {
+        return Some(cwd_file);
     }
-    if let Some(home) = env::var_os("HOME") {
+    if let Some(home) = env.get("HOME") {
         let p = PathBuf::from(home)
             .join(".config")
             .join("vaultwarden-mcp")
@@ -106,7 +144,7 @@ pub fn discover_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
             return Some(p);
         }
     }
-    if let Some(home) = env::var_os("USERPROFILE") {
+    if let Some(home) = env.get("USERPROFILE") {
         let p = PathBuf::from(home)
             .join(".config")
             .join("vaultwarden-mcp")
@@ -120,7 +158,8 @@ pub fn discover_config_path(explicit: Option<&Path>) -> Option<PathBuf> {
 
 /// Load a config file from disk. Returns `Default` if no path was found.
 pub fn load(path: Option<&Path>) -> Result<ConfigFile> {
-    let Some(path) = discover_config_path(path) else {
+    let cwd = env::current_dir().unwrap_or_default();
+    let Some(path) = discover_config_path(path, &cwd, &ProcessEnv) else {
         return Ok(ConfigFile::default());
     };
     let text = std::fs::read_to_string(&path)
@@ -153,6 +192,7 @@ pub fn resolve_accounts(
     secretspec_provider: &str,
     secretspec_profile: &str,
     secretspec_manifest: Option<&Path>,
+    env: &dyn EnvSource,
 ) -> Result<Vec<AccountConfigFile>> {
     // Resolve the secretspec manifest once (not per-account) if any field uses
     // a secret:// reference. Secrets::load() walks the cwd and parents for
@@ -185,9 +225,8 @@ pub fn resolve_accounts(
         account.validate_secret_uris()?;
         let label_upper = account.label.to_uppercase();
         let env_get = |suffix: &str| -> Option<String> {
-            env::var(format!("VAULTWARDEN_ACCOUNT_{label_upper}_{suffix}"))
-                .ok()
-                .or_else(|| env::var(format!("VAULTWARDEN_{suffix}")).ok())
+            env.get(&format!("VAULTWARDEN_ACCOUNT_{label_upper}_{suffix}"))
+                .or_else(|| env.get(&format!("VAULTWARDEN_{suffix}")))
         };
         out.push(AccountConfigFile {
             label: account.label.clone(),
@@ -196,15 +235,14 @@ pub fn resolve_accounts(
             client_secret: resolve_field(env_get("CLIENT_SECRET"), account.client_secret)?,
             password: resolve_field(env_get("PASSWORD"), account.password)?,
             allow_http: account.allow_http.or_else(|| {
-                env::var("VAULTWARDEN_ALLOW_HTTP")
-                    .ok()
+                env.get("VAULTWARDEN_ALLOW_HTTP")
                     .map(|v| v == "1" || v.to_lowercase() == "true")
             }),
         });
     }
 
     if out.is_empty() {
-        out.extend(accounts_from_env_only());
+        out.extend(accounts_from_env_only(env));
     }
 
     validate_required_fields(&out)?;
@@ -212,37 +250,40 @@ pub fn resolve_accounts(
 }
 
 /// Build accounts purely from env vars (no config file).
-pub fn accounts_from_env_only() -> Vec<AccountConfigFile> {
-    let env_list: Vec<String> = env::var("VAULTWARDEN_ACCOUNTS")
+pub fn accounts_from_env_only(env: &dyn EnvSource) -> Vec<AccountConfigFile> {
+    let env_list: Vec<String> = env
+        .get("VAULTWARDEN_ACCOUNTS")
         .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
         .unwrap_or_default();
 
     if env_list.is_empty() {
-        let server = env::var("VAULTWARDEN_SERVER")
-            .or_else(|_| env::var("VAULTWARDEN_URL"))
-            .ok();
-        let client_id = env::var("VAULTWARDEN_CLIENT_ID")
-            .or_else(|_| env::var("BW_CLIENT_ID"))
-            .ok();
-        let client_secret = env::var("VAULTWARDEN_CLIENT_SECRET")
-            .or_else(|_| env::var("BW_CLIENT_SECRET"))
-            .ok();
-        let password = env::var("VAULTWARDEN_PASSWORD")
-            .or_else(|_| env::var("BW_PASSWORD"))
-            .ok();
+        let server = env
+            .get("VAULTWARDEN_SERVER")
+            .or_else(|| env.get("VAULTWARDEN_URL"));
+        let client_id = env
+            .get("VAULTWARDEN_CLIENT_ID")
+            .or_else(|| env.get("BW_CLIENT_ID"));
+        let client_secret = env
+            .get("VAULTWARDEN_CLIENT_SECRET")
+            .or_else(|| env.get("BW_CLIENT_SECRET"));
+        let password = env
+            .get("VAULTWARDEN_PASSWORD")
+            .or_else(|| env.get("BW_PASSWORD"));
 
         if server.is_none() && client_id.is_none() && client_secret.is_none() && password.is_none()
         {
             return Vec::new();
         }
         return vec![AccountConfigFile {
-            label: env::var("VAULTWARDEN_ACCOUNT_NAME").unwrap_or_else(|_| "default".to_string()),
+            label: env
+                .get("VAULTWARDEN_ACCOUNT_NAME")
+                .unwrap_or_else(|| "default".to_string()),
             server: server.unwrap_or_default(),
             client_id: client_id.unwrap_or_default(),
             client_secret: client_secret.unwrap_or_default(),
             password: password.unwrap_or_default(),
-            allow_http: env::var("VAULTWARDEN_ALLOW_HTTP")
-                .ok()
+            allow_http: env
+                .get("VAULTWARDEN_ALLOW_HTTP")
                 .map(|v| v == "1" || v.to_lowercase() == "true"),
         }];
     }
@@ -252,9 +293,7 @@ pub fn accounts_from_env_only() -> Vec<AccountConfigFile> {
         .filter_map(|label| {
             let prefix = format!("VAULTWARDEN_ACCOUNT_{}_", label.to_uppercase());
             let get = |key: &str| -> Option<String> {
-                env::var(format!("{prefix}{key}"))
-                    .ok()
-                    .or_else(|| env::var(key).ok())
+                env.get(&format!("{prefix}{key}")).or_else(|| env.get(key))
             };
             Some(AccountConfigFile {
                 server: get("SERVER").or_else(|| get("URL"))?,
@@ -327,6 +366,17 @@ mod tests {
         }
     }
 
+    /// Build an in-memory env map from pairs. No process-global mutation —
+    /// parallel tests never race on `std::env`.
+    fn map_env(pairs: &[(&str, &str)]) -> MapEnv {
+        MapEnv(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        )
+    }
+
     #[test]
     fn merge_field_prefers_env() {
         assert_eq!(merge_field(Some("ENV".into()), "FILE".into()), "ENV");
@@ -336,13 +386,13 @@ mod tests {
     #[test]
     fn discover_returns_explicit_path() {
         let p = PathBuf::from("__definitely__missing__config.toml");
-        let got = discover_config_path(Some(&p));
+        let got = discover_config_path(Some(&p), Path::new("."), &MapEnv::default());
         assert_eq!(got, Some(p));
     }
 
     #[test]
     fn discover_does_not_panic_for_no_path() {
-        let _ = discover_config_path(None);
+        let _ = discover_config_path(None, Path::new("."), &MapEnv::default());
     }
 
     #[test]
@@ -413,15 +463,11 @@ mod tests {
             password = "file_pw"
         "#;
         let cfg: ConfigFile = toml::from_str(toml).unwrap();
-        unsafe {
-            env::set_var("VAULTWARDEN_ACCOUNT_P_PASSWORD", "env_pw");
-            env::set_var("VAULTWARDEN_ACCOUNT_P_CLIENT_ID", "env_id");
-        }
-        let result = resolve_accounts(cfg, "env", "default", None).unwrap();
-        unsafe {
-            env::remove_var("VAULTWARDEN_ACCOUNT_P_PASSWORD");
-            env::remove_var("VAULTWARDEN_ACCOUNT_P_CLIENT_ID");
-        }
+        let env = map_env(&[
+            ("VAULTWARDEN_ACCOUNT_P_PASSWORD", "env_pw"),
+            ("VAULTWARDEN_ACCOUNT_P_CLIENT_ID", "env_id"),
+        ]);
+        let result = resolve_accounts(cfg, "env", "default", None, &env).unwrap();
         assert_eq!(result[0].password, "env_pw");
         assert_eq!(result[0].client_id, "env_id");
         assert_eq!(result[0].server, "https://file");
@@ -484,19 +530,13 @@ mod tests {
 
     #[test]
     fn env_only_single_account() {
-        unsafe {
-            env::set_var("VAULTWARDEN_SERVER", "https://env.example.com");
-            env::set_var("VAULTWARDEN_CLIENT_ID", "env.user");
-            env::set_var("VAULTWARDEN_CLIENT_SECRET", "env.secret");
-            env::set_var("VAULTWARDEN_PASSWORD", "env.pw");
-        }
-        let accounts = accounts_from_env_only();
-        unsafe {
-            env::remove_var("VAULTWARDEN_SERVER");
-            env::remove_var("VAULTWARDEN_CLIENT_ID");
-            env::remove_var("VAULTWARDEN_CLIENT_SECRET");
-            env::remove_var("VAULTWARDEN_PASSWORD");
-        }
+        let env = map_env(&[
+            ("VAULTWARDEN_SERVER", "https://env.example.com"),
+            ("VAULTWARDEN_CLIENT_ID", "env.user"),
+            ("VAULTWARDEN_CLIENT_SECRET", "env.secret"),
+            ("VAULTWARDEN_PASSWORD", "env.pw"),
+        ]);
+        let accounts = accounts_from_env_only(&env);
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].server, "https://env.example.com");
         assert_eq!(accounts[0].client_id, "env.user");
@@ -507,32 +547,18 @@ mod tests {
 
     #[test]
     fn env_only_multi_account() {
-        unsafe {
-            env::set_var("VAULTWARDEN_ACCOUNTS", "jan,work");
-            env::set_var("VAULTWARDEN_ACCOUNT_JAN_SERVER", "https://jan.example.com");
-            env::set_var("VAULTWARDEN_ACCOUNT_JAN_CLIENT_ID", "jan.id");
-            env::set_var("VAULTWARDEN_ACCOUNT_JAN_CLIENT_SECRET", "jan.sec");
-            env::set_var("VAULTWARDEN_ACCOUNT_JAN_PASSWORD", "jan.pw");
-            env::set_var(
-                "VAULTWARDEN_ACCOUNT_WORK_SERVER",
-                "https://work.example.com",
-            );
-            env::set_var("VAULTWARDEN_ACCOUNT_WORK_CLIENT_ID", "work.id");
-            env::set_var("VAULTWARDEN_ACCOUNT_WORK_CLIENT_SECRET", "work.sec");
-            env::set_var("VAULTWARDEN_ACCOUNT_WORK_PASSWORD", "work.pw");
-        }
-        let accounts = accounts_from_env_only();
-        unsafe {
-            env::remove_var("VAULTWARDEN_ACCOUNTS");
-            env::remove_var("VAULTWARDEN_ACCOUNT_JAN_SERVER");
-            env::remove_var("VAULTWARDEN_ACCOUNT_JAN_CLIENT_ID");
-            env::remove_var("VAULTWARDEN_ACCOUNT_JAN_CLIENT_SECRET");
-            env::remove_var("VAULTWARDEN_ACCOUNT_JAN_PASSWORD");
-            env::remove_var("VAULTWARDEN_ACCOUNT_WORK_SERVER");
-            env::remove_var("VAULTWARDEN_ACCOUNT_WORK_CLIENT_ID");
-            env::remove_var("VAULTWARDEN_ACCOUNT_WORK_CLIENT_SECRET");
-            env::remove_var("VAULTWARDEN_ACCOUNT_WORK_PASSWORD");
-        }
+        let env = map_env(&[
+            ("VAULTWARDEN_ACCOUNTS", "jan,work"),
+            ("VAULTWARDEN_ACCOUNT_JAN_SERVER", "https://jan.example.com"),
+            ("VAULTWARDEN_ACCOUNT_JAN_CLIENT_ID", "jan.id"),
+            ("VAULTWARDEN_ACCOUNT_JAN_CLIENT_SECRET", "jan.sec"),
+            ("VAULTWARDEN_ACCOUNT_JAN_PASSWORD", "jan.pw"),
+            ("VAULTWARDEN_ACCOUNT_WORK_SERVER", "https://work.example.com"),
+            ("VAULTWARDEN_ACCOUNT_WORK_CLIENT_ID", "work.id"),
+            ("VAULTWARDEN_ACCOUNT_WORK_CLIENT_SECRET", "work.sec"),
+            ("VAULTWARDEN_ACCOUNT_WORK_PASSWORD", "work.pw"),
+        ]);
+        let accounts = accounts_from_env_only(&env);
         assert_eq!(accounts.len(), 2);
         assert_eq!(accounts[0].label, "jan");
         assert_eq!(accounts[0].server, "https://jan.example.com");
@@ -542,7 +568,7 @@ mod tests {
 
     #[test]
     fn env_only_no_vars_returns_empty() {
-        let accounts = accounts_from_env_only();
+        let accounts = accounts_from_env_only(&MapEnv::default());
         assert!(accounts.is_empty());
     }
 
@@ -550,20 +576,14 @@ mod tests {
 
     #[test]
     fn resolve_accounts_empty_config_falls_back_to_env() {
-        unsafe {
-            env::set_var("VAULTWARDEN_SERVER", "https://fallback.example.com");
-            env::set_var("VAULTWARDEN_CLIENT_ID", "fallback.id");
-            env::set_var("VAULTWARDEN_CLIENT_SECRET", "fallback.sec");
-            env::set_var("VAULTWARDEN_PASSWORD", "fallback.pw");
-        }
+        let env = map_env(&[
+            ("VAULTWARDEN_SERVER", "https://fallback.example.com"),
+            ("VAULTWARDEN_CLIENT_ID", "fallback.id"),
+            ("VAULTWARDEN_CLIENT_SECRET", "fallback.sec"),
+            ("VAULTWARDEN_PASSWORD", "fallback.pw"),
+        ]);
         let cfg = ConfigFile::default();
-        let result = resolve_accounts(cfg, "env", "default", None).unwrap();
-        unsafe {
-            env::remove_var("VAULTWARDEN_SERVER");
-            env::remove_var("VAULTWARDEN_CLIENT_ID");
-            env::remove_var("VAULTWARDEN_CLIENT_SECRET");
-            env::remove_var("VAULTWARDEN_PASSWORD");
-        }
+        let result = resolve_accounts(cfg, "env", "default", None, &env).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].server, "https://fallback.example.com");
     }
@@ -581,11 +601,7 @@ mod tests {
         )
         .unwrap();
 
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&dir).unwrap();
-        let found = discover_config_path(None);
-        std::env::set_current_dir(&prev).unwrap();
-
+        let found = discover_config_path(None, &dir, &MapEnv::default());
         let _ = std::fs::remove_dir_all(&dir);
         assert!(found.is_some(), "should find vaultwarden-mcp.toml in cwd");
         if let Some(ref p) = found {
@@ -610,21 +626,9 @@ mod tests {
         )
         .unwrap();
 
-        let prev_home = env::var("HOME").ok();
-        let prev_up = env::var("USERPROFILE").ok();
-        unsafe {
-            env::set_var("HOME", dir.to_str().unwrap());
-            env::set_var("USERPROFILE", dir.to_str().unwrap());
-        }
-        let found = discover_config_path(None);
-        match prev_home {
-            Some(v) => unsafe { env::set_var("HOME", v) },
-            None => unsafe { env::remove_var("HOME") },
-        }
-        match prev_up {
-            Some(v) => unsafe { env::set_var("USERPROFILE", v) },
-            None => unsafe { env::remove_var("USERPROFILE") },
-        }
+        let home = dir.to_str().unwrap();
+        let env = map_env(&[("HOME", home), ("USERPROFILE", home)]);
+        let found = discover_config_path(None, &dir, &env);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(found.is_some(), "should find config.toml in home dir");
     }
@@ -690,20 +694,23 @@ mod tests {
         dir
     }
 
+    /// Write a temp `.env` file and return the `dotenv:<path>` provider URI.
+    /// File-backed provider → tests never mutate process-global env vars.
+    fn dotenv_provider(dir: &tempfile::TempDir, content: &str) -> String {
+        let path = dir.path().join(".env");
+        std::fs::write(&path, content).expect("write .env");
+        format!("dotenv:{}", path.display())
+    }
+
     #[test]
     fn resolve_value_resolves_secret_uri_via_env_provider() {
         let dir = write_temp_manifest(
             "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_PRESENT = { description = \"pw\" }\n",
         );
         let manifest = dir.path().join("secretspec.toml");
+        let provider = dotenv_provider(&dir, "VWMCP_TEST_PRESENT=super-secret\n");
 
-        unsafe {
-            env::set_var("VWMCP_TEST_PRESENT", "super-secret");
-        }
-        let resp = crate::secrets::resolve(Some(&manifest), "env", "default").expect("resolve");
-        unsafe {
-            env::remove_var("VWMCP_TEST_PRESENT");
-        }
+        let resp = crate::secrets::resolve(Some(&manifest), &provider, "default").expect("resolve");
 
         let val =
             crate::secrets::resolve_value("secret://VWMCP_TEST_PRESENT", &resp).expect("lookup");
@@ -716,7 +723,8 @@ mod tests {
         let toml = "\n            [[accounts]]\n            label = \"p\"\n            server = \"https://x\"\n            client_id = \"id\"\n            client_secret = \"plaintext-secret\"\n            password = \"plaintext-pw\"\n        ";
         let cfg: ConfigFile = toml::from_str(toml).unwrap();
         // resolve_accounts with no secret:// refs must not touch secretspec.
-        let accounts = resolve_accounts(cfg, "env", "default", None).expect("resolve plaintext");
+        let accounts =
+            resolve_accounts(cfg, "env", "default", None, &MapEnv::default()).expect("resolve plaintext");
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].client_secret, "plaintext-secret");
         assert_eq!(accounts[0].password, "plaintext-pw");
@@ -728,11 +736,9 @@ mod tests {
             "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_ABSENT = { description = \"pw\", required = true }\n",
         );
         let manifest = dir.path().join("secretspec.toml");
-        // Distinct env var name so parallel tests can't satisfy it.
-        unsafe {
-            env::remove_var("VWMCP_TEST_ABSENT");
-        }
-        let err = crate::secrets::resolve(Some(&manifest), "env", "default");
+        // Empty .env → the required secret is absent, resolution must error.
+        let provider = dotenv_provider(&dir, "");
+        let err = crate::secrets::resolve(Some(&manifest), &provider, "default");
         assert!(err.is_err(), "missing required secret must error");
         let msg = format!("{}", err.unwrap_err());
         assert!(
@@ -747,15 +753,12 @@ mod tests {
             "[project]\nname = \"t\"\nrevision = \"1.0\"\n\n[profiles.default]\nVWMCP_TEST_MANIFEST = { description = \"pw\" }\n",
         );
         let manifest = dir.path().join("secretspec.toml");
+        let provider = dotenv_provider(&dir, "VWMCP_TEST_MANIFEST=manifest-pass\n");
         let toml = "\n            [[accounts]]\n            label = \"p\"\n            server = \"https://x\"\n            client_id = \"id\"\n            client_secret = \"secret://VWMCP_TEST_MANIFEST\"\n            password = \"sec\"\n        ";
         let cfg: ConfigFile = toml::from_str(toml).unwrap();
-        unsafe {
-            env::set_var("VWMCP_TEST_MANIFEST", "manifest-pass");
-        }
-        let accounts = resolve_accounts(cfg, "env", "default", Some(&manifest)).unwrap();
-        unsafe {
-            env::remove_var("VWMCP_TEST_MANIFEST");
-        }
+        let accounts =
+            resolve_accounts(cfg, &provider, "default", Some(&manifest), &MapEnv::default())
+                .unwrap();
         assert_eq!(accounts[0].client_secret, "manifest-pass");
     }
 }
