@@ -255,6 +255,7 @@ fn load_accounts(
         secretspec_provider,
         secretspec_profile,
         secretspec_manifest,
+        &config::ProcessEnv,
     )?;
     Ok(resolved.into_iter().map(to_mcp_account).collect())
 }

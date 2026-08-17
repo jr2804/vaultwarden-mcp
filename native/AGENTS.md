@@ -17,7 +17,9 @@ for writes.
 - `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto, token renewal, write methods
 - `native/src/session_cache.rs` — owner-only token/derived-key cache, password verifier, TTL and auth-error invalidation
 - `native/src/mcp.rs` — `ServerHandler` impl, tool list, `AccountConfig`, write-tool param structs
-- `native/src/config.rs` — TOML config loader + env-var merge; resolves `secret://NAME` URIs via secretspec
+- `native/src/config.rs` — TOML config loader + env-var merge via injected
+  `EnvSource` (`ProcessEnv` in production, `MapEnv` in tests); resolves
+  `secret://NAME` URIs via secretspec
 - `native/src/secrets.rs` — secretspec 0.18 runtime integration (resolve manifest + look up `secret://` values)
 - `native/src/crypto.rs` — production symmetric encrypt (`2.{iv}|{ct}|{mac}`, random IV);
   needed because `vaultwarden-cli`'s `CryptoKeys` exposes decrypt but not encrypt
