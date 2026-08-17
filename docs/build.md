@@ -21,8 +21,9 @@ The binary is at `target/release/vaultwarden-mcp`.
 ### C toolchain: system or Zig
 
 The native crate's C dependencies (dbus, ring) need a C compiler and an
-archiver. `native/.cargo/config.toml` wires up shims
-(`native/scripts/{cc,cxx,ar,ranlib}`) that:
+archiver. `.cargo/config.toml` (repo root, so both `cargo` from `native/` and
+`cargo --manifest-path native/Cargo.toml` from the root pick it up) wires up
+shims (`native/scripts/{cc,cxx,ar,ranlib}`) that:
 
 1. **Prefer the system compiler** (`cc`/`gcc`/`clang`, `musl-gcc` for musl
    targets) when one is installed — CI and normal dev machines are unaffected.

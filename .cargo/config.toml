@@ -1,0 +1,18 @@
+# C-toolchain shims for the native crate's C dependencies (dbus, ring, ...).
+#
+# Lives at the repo root (not native/) so cargo picks it up both when invoked
+# from the repo root (e.g. `mise run test`: `cargo test --manifest-path
+# native/Cargo.toml`) and from `native/` (CI uses `working-directory: native`).
+#
+# cc-rs resolves the compiler via `CC_<target>` (then `AR_<target>`,
+# `RANLIB_<target>`) before falling back to platform defaults. We only set
+# the *native Linux x86_64* prefixed vars, so:
+#   - machines with no system C compiler but with zig (via mise) build fine:
+#     the shims delegate to `zig cc` / `zig ar`;
+#   - CI is unaffected: musl targets fall back to musl-gcc, Windows to
+#     cl.exe/llvm-lib, macOS to clang — none of them match this prefix.
+[env]
+CC_x86_64-unknown-linux-gnu = { value = "native/scripts/cc", relative = true }
+CXX_x86_64-unknown-linux-gnu = { value = "native/scripts/cxx", relative = true }
+AR_x86_64-unknown-linux-gnu = { value = "native/scripts/ar", relative = true }
+RANLIB_x86_64-unknown-linux-gnu = { value = "native/scripts/ranlib", relative = true }
