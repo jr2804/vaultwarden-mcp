@@ -1,0 +1,16 @@
+#!/bin/sh
+# ranlib shim: system ranlib first, `zig ranlib` fallback.
+set -u
+for c in ranlib; do
+  if command -v "$c" >/dev/null 2>&1; then
+    exec "$c" "$@"
+  fi
+done
+if command -v mise >/dev/null 2>&1 && mise exec -- zig version >/dev/null 2>&1; then
+  exec mise exec -- zig ranlib "$@"
+fi
+if command -v zig >/dev/null 2>&1; then
+  exec zig ranlib "$@"
+fi
+echo "ranlib shim: no system ranlib and no zig found" >&2
+exit 1

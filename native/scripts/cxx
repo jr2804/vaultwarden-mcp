@@ -1,0 +1,28 @@
+#!/bin/sh
+# C++ compiler shim: system compiler first, zig c++ fallback. Mirrors `cc`.
+set -u
+args=""
+for a in "$@"; do
+  case "$a" in
+    --target=x86_64-unknown-linux-gnu)      args="$args --target=x86_64-linux-gnu" ;;
+    --target=x86_64-unknown-linux-musl)     args="$args --target=x86_64-linux-musl" ;;
+    --target=aarch64-unknown-linux-gnu)     args="$args --target=aarch64-linux-gnu" ;;
+    --target=aarch64-unknown-linux-musl)    args="$args --target=aarch64-linux-musl" ;;
+    --target=x86_64-apple-darwin)           args="$args --target=x86_64-macos" ;;
+    --target=aarch64-apple-darwin)          args="$args --target=aarch64-macos" ;;
+    *) args="$args $a" ;;
+  esac
+done
+for c in c++ g++ clang++; do
+  if command -v "$c" >/dev/null 2>&1; then
+    exec "$c" "$@"
+  fi
+done
+if command -v mise >/dev/null 2>&1 && mise exec -- zig version >/dev/null 2>&1; then
+  exec mise exec -- zig c++ $args
+fi
+if command -v zig >/dev/null 2>&1; then
+  exec zig c++ $args
+fi
+echo "cxx shim: no system C++ compiler and no zig found" >&2
+exit 1

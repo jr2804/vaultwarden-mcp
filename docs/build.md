@@ -4,7 +4,9 @@
 
 - **Rust 1.88+** — install via [rustup](https://rustup.rs/)
 - **Git** — for cloning the repository
-- **C compiler** — for compiling native dependencies (gcc/clang)
+- **C compiler** — for compiling native dependencies (gcc/clang). **Optional:**
+  on machines without a C toolchain, [Zig](https://ziglang.org/) ≥ 0.13 (e.g.
+  via `mise install zig`) is used automatically instead.
 
 ## Clone and Build
 
@@ -15,6 +17,20 @@ cargo build --release
 ```
 
 The binary is at `target/release/vaultwarden-mcp`.
+
+### C toolchain: system or Zig
+
+The native crate's C dependencies (dbus, ring) need a C compiler and an
+archiver. `native/.cargo/config.toml` wires up shims
+(`native/scripts/{cc,cxx,ar,ranlib}`) that:
+
+1. **Prefer the system compiler** (`cc`/`gcc`/`clang`, `musl-gcc` for musl
+   targets) when one is installed — CI and normal dev machines are unaffected.
+2. **Fall back to Zig** (`zig cc` / `zig ar` / `zig ranlib`) when no system
+   C toolchain exists, so `cargo build` works with only Rust + Zig installed.
+
+The shims are scoped to the `x86_64-unknown-linux-gnu` target only; cross and
+MSVC builds keep using their own toolchain detection.
 
 ## Build Features
 

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Archiver shim: system ar first, `zig ar` fallback.
+set -u
+for c in ar; do
+  if command -v "$c" >/dev/null 2>&1; then
+    exec "$c" "$@"
+  fi
+done
+if command -v mise >/dev/null 2>&1 && mise exec -- zig version >/dev/null 2>&1; then
+  exec mise exec -- zig ar "$@"
+fi
+if command -v zig >/dev/null 2>&1; then
+  exec zig ar "$@"
+fi
+echo "ar shim: no system ar and no zig found" >&2
+exit 1

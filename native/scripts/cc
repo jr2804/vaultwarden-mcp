@@ -1,0 +1,72 @@
+#!/bin/sh
+# C compiler shim: use the system compiler when available (CI, normal dev
+# machines), otherwise fall back to `zig cc` so machines with only Zig
+# installed can build the native crate without a full C toolchain.
+#
+# Wired up via native/.cargo/config.toml ([target.'cfg(unix)'.env]) so the
+# Windows/MSVC build path is untouched.
+set -u
+
+# cc-rs passes Rust-style target triples via the TARGET env var to build
+# scripts; translate to Zig's spelling when we fall back to zig.
+TARGET="${TARGET:-}"
+args=""
+for a in "$@"; do
+  case "$a" in
+    --target=x86_64-unknown-linux-gnu)      args="$args --target=x86_64-linux-gnu" ;;
+    --target=x86_64-unknown-linux-musl)     args="$args --target=x86_64-linux-musl" ;;
+    --target=aarch64-unknown-linux-gnu)     args="$args --target=aarch64-linux-gnu" ;;
+    --target=aarch64-unknown-linux-musl)    args="$args --target=aarch64-linux-musl" ;;
+    --target=x86_64-apple-darwin)           args="$args --target=x86_64-macos" ;;
+    --target=aarch64-apple-darwin)          args="$args --target=aarch64-macos" ;;
+    *) args="$args $a" ;;
+  esac
+done
+
+# 1) musl targets: cc-rs needs a musl-capable compiler for static Linux
+#    builds (release CI). Prefer the target-specific musl-gcc, then plain
+#    musl-gcc, then fall through to zig (which can target musl natively).
+case "$TARGET" in
+  *musl*)
+    for c in "${TARGET}-gcc" "musl-gcc"; do
+      if command -v "$c" >/dev/null 2>&1; then
+        exec "$c" "$@"
+      fi
+    done
+    # zig cc can build for musl: add the target if cc-rs didn't pass it.
+    if command -v mise >/dev/null 2>&1 && mise exec -- zig version >/dev/null 2>&1; then
+      case "$TARGET" in
+        aarch64*) args="$args --target=aarch64-linux-musl" ;;
+        *)        args="$args --target=x86_64-linux-musl" ;;
+      esac
+      exec mise exec -- zig cc $args
+    fi
+    if command -v zig >/dev/null 2>&1; then
+      case "$TARGET" in
+        aarch64*) args="$args --target=aarch64-linux-musl" ;;
+        *)        args="$args --target=x86_64-linux-musl" ;;
+      esac
+      exec zig cc $args
+    fi
+    ;;
+esac
+
+# 2) Any system C compiler beats zig (CI runners, normal machines).
+for c in cc gcc clang; do
+  if command -v "$c" >/dev/null 2>&1; then
+    exec "$c" "$@"
+  fi
+done
+
+# 3) Zig fallback for the "no C toolchain" case this shim exists for.
+#    Resolve zig through mise first (project-pinned via .config/mise/config.toml),
+#    then a plain `zig` on PATH (e.g. global install).
+if command -v mise >/dev/null 2>&1 && mise exec -- zig version >/dev/null 2>&1; then
+  exec mise exec -- zig cc $args
+fi
+if command -v zig >/dev/null 2>&1; then
+  exec zig cc $args
+fi
+
+echo "cc shim: no system compiler (cc/gcc/clang) and no zig found" >&2
+exit 1

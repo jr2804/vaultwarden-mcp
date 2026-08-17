@@ -24,6 +24,9 @@ for writes.
   and `/api/folders`); exists because `vaultwarden-cli`'s `ApiClient` is read-only
   with private fields
 - `native/Cargo.toml` — deps, features (`http` default), `[dev-dependencies]` for tests
+- `native/.cargo/config.toml` + `native/scripts/{cc,cxx,ar,ranlib}` — C-toolchain
+  shims: system compiler first, `zig cc`/`zig ar` fallback (see `docs/build.md`);
+  scoped to `x86_64-unknown-linux-gnu` so CI/musl/MSVC toolchain detection is untouched
 - `native/tests/common/mod.rs` — shared test fixtures (key derivation + cipher encryption helpers)
 - `native/tests/crypto_roundtrip.rs` — **Tier 1**: offline crypto round-trip (no server, no Docker)
 - `native/tests/integration_mock.rs` — **Tier 2**: wiremock end-to-end against mock

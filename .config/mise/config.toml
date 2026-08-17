@@ -8,6 +8,11 @@ bun = "latest"
 # Rust toolchain for native server binary
 rust = "1.97"
 
+# C toolchain fallback for the native crate: `zig cc`/`zig ar` are used by
+# native/scripts/{cc,cxx,ar,ranlib} when no system C compiler is installed.
+# Pinned here so a clean clone builds with only `mise install` (no global zig).
+zig = "0.13.0"
+
 # Linter/formatter/type checker tools
 "ruff" = "latest"
 "ty" = "latest"
