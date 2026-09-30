@@ -187,11 +187,7 @@ impl VaultwardenSession {
         }
 
         // Acquire write lock to serialize folder creation.
-        let enc_name = crate::crypto::encrypt_string(
-            name,
-            self.crypto_keys.enc_key_bytes(),
-            self.crypto_keys.mac_key_bytes(),
-        )?;
+        let enc_name = self.encrypt_str(name)?;
         let client = self.write_client()?;
         let body = serde_json::json!({ "name": enc_name });
         let created =
@@ -550,58 +546,52 @@ pub struct CipherEdit {
 }
 
 impl VaultwardenSession {
+    /// Encrypt one string field. Always succeeds or returns an encryption error.
+    fn encrypt_str(&self, s: &str) -> Result<String> {
+        crate::crypto::encrypt_string(
+            s,
+            self.crypto_keys.enc_key_bytes(),
+            self.crypto_keys.mac_key_bytes(),
+        )
+    }
+
     /// Encrypt one optional string field. `None` stays `None`.
     fn enc_opt(&self, s: Option<&str>) -> Result<Option<String>> {
-        s.map(|v| {
-            crate::crypto::encrypt_string(
-                v,
-                self.crypto_keys.enc_key_bytes(),
-                self.crypto_keys.mac_key_bytes(),
-            )
-        })
-        .transpose()
+        s.map(|v| self.encrypt_str(v)).transpose()
     }
 
     /// Build the encrypted JSON body for a create request.
     fn build_create_body(&self, input: &CipherInput) -> Result<serde_json::Value> {
         let mut body = serde_json::json!({
             "type": input.cipher_type.as_u8(),
-            "name": crate::crypto::encrypt_string(
-                &input.name,
-                self.crypto_keys.enc_key_bytes(),
-                self.crypto_keys.mac_key_bytes(),
-            )?,
+            "name": self.encrypt_str(&input.name)?,
         });
 
         if let Some(notes) = input.notes.as_deref() {
-            body["notes"] = serde_json::Value::String(self.enc_opt(Some(notes))?.unwrap());
+            body["notes"] = serde_json::Value::String(self.encrypt_str(notes)?);
         }
 
         let mut login = serde_json::Map::new();
         if let Some(u) = input.username.as_deref() {
             login.insert(
                 "username".into(),
-                serde_json::Value::String(self.enc_opt(Some(u))?.unwrap()),
+                serde_json::Value::String(self.encrypt_str(u)?),
             );
         }
         if let Some(p) = input.password.as_deref() {
             login.insert(
                 "password".into(),
-                serde_json::Value::String(self.enc_opt(Some(p))?.unwrap()),
+                serde_json::Value::String(self.encrypt_str(p)?),
             );
         }
         if let Some(t) = input.totp.as_deref() {
             login.insert(
                 "totp".into(),
-                serde_json::Value::String(self.enc_opt(Some(t))?.unwrap()),
+                serde_json::Value::String(self.encrypt_str(t)?),
             );
         }
         if let Some(uri) = input.uri.as_deref() {
-            let enc_uri = crate::crypto::encrypt_string(
-                uri,
-                self.crypto_keys.enc_key_bytes(),
-                self.crypto_keys.mac_key_bytes(),
-            )?;
+            let enc_uri = self.encrypt_str(uri)?;
             login.insert(
                 "uris".into(),
                 serde_json::json!([{ "uri": enc_uri, "match": null }]),
@@ -631,11 +621,7 @@ impl VaultwardenSession {
                     _ => 0,
                 };
                 Ok(serde_json::json!({
-                    "name": crate::crypto::encrypt_string(
-                        &f.name,
-                        self.crypto_keys.enc_key_bytes(),
-                        self.crypto_keys.mac_key_bytes(),
-                    )?,
+                    "name": self.encrypt_str(&f.name)?,
                     "value": self.enc_opt(f.value.as_deref())?.unwrap_or_default(),
                     "type": ftype,
                     "linkedId": null,
@@ -806,11 +792,7 @@ impl VaultwardenSession {
                 "note" => 2u8,
                 _ => 1u8,
             },
-            "name": crate::crypto::encrypt_string(
-                &current.name,
-                self.crypto_keys.enc_key_bytes(),
-                self.crypto_keys.mac_key_bytes(),
-            )?,
+            "name": self.encrypt_str(&current.name)?,
         });
         let updated = crate::api_write::soft_delete_cipher(
             &client,
@@ -836,11 +818,7 @@ impl VaultwardenSession {
                     "note" => 2u8,
                     _ => 1u8,
                 },
-                "name": crate::crypto::encrypt_string(
-                    &c.name,
-                    self.crypto_keys.enc_key_bytes(),
-                    self.crypto_keys.mac_key_bytes(),
-                )?,
+                "name": self.encrypt_str(&c.name)?,
             }),
             None => serde_json::json!({}),
         };
@@ -869,11 +847,7 @@ impl VaultwardenSession {
 
     /// Create a new folder. Returns the decrypted `FolderEntry`.
     pub async fn create_folder(&self, name: &str) -> Result<FolderEntry> {
-        let enc_name = crate::crypto::encrypt_string(
-            name,
-            self.crypto_keys.enc_key_bytes(),
-            self.crypto_keys.mac_key_bytes(),
-        )?;
+        let enc_name = self.encrypt_str(name)?;
         let client = self.write_client()?;
         let body = serde_json::json!({ "name": enc_name });
         let created =
@@ -902,11 +876,7 @@ impl VaultwardenSession {
         let folder_id = self
             .folder_id_for_name(name)
             .ok_or_else(|| anyhow::anyhow!("folder not found: {}", name))?;
-        let enc_name = crate::crypto::encrypt_string(
-            new_name,
-            self.crypto_keys.enc_key_bytes(),
-            self.crypto_keys.mac_key_bytes(),
-        )?;
+        let enc_name = self.encrypt_str(new_name)?;
         let client = self.write_client()?;
         let body = serde_json::json!({ "name": enc_name });
         let _updated = crate::api_write::rename_folder(
