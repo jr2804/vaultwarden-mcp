@@ -144,28 +144,61 @@ vaultwarden-mcp serve --secretspec-provider dotenv:./secrets.env
 
 ### Verifying without starting the server
 
-`print-config` resolves everything (including `secret://` refs) and prints the
+`print-config` resolves everything (including `secret://` refs) and logs the
 effective config with secrets redacted as `***` — a quick way to confirm your
-manifest and provider are wired correctly:
+manifest and provider are wired correctly. Output is emitted through `tracing`
+to stderr (see [Log level](#log-level) below); the default `info` level means
+the dump appears out of the box.
 
 ```bash
 vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
 ```
 
 ```text
-vaultwarden-mcp — effective config:
-  [human]
-    server:        https://vault.example.com
-    client_id:     user.human
-    client_secret: ***
-    password:      ***
-    allow_http:    false
-  [agent]
-    server:        https://vault.example.com
-    client_id:     user.agent
-    client_secret: ***
-    password:      ***
-    allow_http:    false
+2026-10-07T12:00:00.000000Z  INFO  vaultwarden_mcp: vaultwarden-mcp — effective config:
+2026-10-07T12:00:00.000001Z  INFO  vaultwarden_mcp:   [human]
+2026-10-07T12:00:00.000002Z  INFO  vaultwarden_mcp:     server:        https://vault.example.com
+2026-10-07T12:00:00.000003Z  INFO  vaultwarden_mcp:     client_id:     user.human
+2026-10-07T12:00:00.000004Z  INFO  vaultwarden_mcp:     client_secret: ***
+2026-10-07T12:00:00.000005Z  INFO  vaultwarden_mcp:     password:      ***
+2026-10-07T12:00:00.000006Z  INFO  vaultwarden_mcp:     allow_http:    false
+2026-10-07T12:00:00.000007Z  INFO  vaultwarden_mcp:   [agent]
+2026-10-07T12:00:00.000008Z  INFO  vaultwarden_mcp:     server:        https://vault.example.com
+2026-10-07T12:00:00.000009Z  INFO  vaultwarden_mcp:     client_id:     user.agent
+2026-10-07T12:00:00.000010Z  INFO  vaultwarden_mcp:     client_secret: ***
+2026-10-07T12:00:00.000011Z  INFO  vaultwarden_mcp:     password:      ***
+2026-10-07T12:00:00.000012Z  INFO  vaultwarden_mcp:     allow_http:    false
+```
+
+To suppress startup/config output (e.g. for scripting), raise the log level:
+
+```bash
+RUST_LOG=warn vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
+```
+
+## Log level
+
+All startup and runtime diagnostics — including `print-config` output and the
+HTTP `Listening on …` banner — go through the
+[`tracing`](https://docs.rs/tracing) crate and respect the `RUST_LOG`
+environment variable. When `RUST_LOG` is **unset**, the default is `info`, so
+informational messages appear out of the box.
+
+| `RUST_LOG` | Effect |
+|------------|--------|
+| *(unset)*  | `info` — startup banners, config dump, and listening address are shown |
+| `warn`     | `warn` and above only — suppresses `info`-level startup output |
+| `debug`    | `debug` and above — includes per-request diagnostics |
+| `trace`    | Most verbose — everything |
+
+Per-crate granularity is supported using `target=level` syntax:
+
+```bash
+# Only see trace-level messages from vaultwarden-mcp itself
+RUST_LOG=vaultwarden_mcp=trace vaultwarden-mcp serve --transport stdio
+
+# Quiet: only warnings and errors, from all crates
+RUST_LOG=warn vaultwarden-mcp serve --transport http
 ```
 
 If a required secret is missing, startup fails fast with the name of the
