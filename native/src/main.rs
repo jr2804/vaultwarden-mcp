@@ -87,7 +87,10 @@ enum Commands {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     match &cli.command {
@@ -128,14 +131,14 @@ async fn main() -> anyhow::Result<()> {
                 secretspec_profile,
                 secretspec_manifest.as_deref(),
             )?;
-            println!("vaultwarden-mcp — effective config:");
+            tracing::info!("vaultwarden-mcp — effective config:");
             for a in &accounts {
-                println!("  [{}]", a.label);
-                println!("    server:        {}", a.server);
-                println!("    client_id:     {}", a.client_id);
-                println!("    client_secret: {}", redact(&a.client_secret));
-                println!("    password:      {}", redact(&a.password));
-                println!("    allow_http:    {}", a.allow_http);
+                tracing::info!("  [{}]", a.label);
+                tracing::info!("    server:        {}", a.server);
+                tracing::info!("    client_id:     {}", a.client_id);
+                tracing::info!("    client_secret: {}", redact(&a.client_secret));
+                tracing::info!("    password:      {}", redact(&a.password));
+                tracing::info!("    allow_http:    {}", a.allow_http);
             }
         }
     }
@@ -164,7 +167,7 @@ async fn serve_http(server: VaultwardenMcpServer, host: &str, port: u16) -> anyh
     );
     let router = axum::Router::new().nest_service("/mcp", svc);
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-    println!("Listening on http://{}/mcp", addr);
+    tracing::info!("Listening on http://{}/mcp", addr);
     axum::serve(tokio::net::TcpListener::bind(addr).await?, router).await?;
     Ok(())
 }
