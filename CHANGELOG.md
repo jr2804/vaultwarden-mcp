@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Startup messages (`--print-config` dump, HTTP `Listening on…` banner) now go
+  through the `tracing` crate instead of `println!`, respecting `RUST_LOG`
+  (default level: `info`). See the "Log level" section in `docs/configuration.md`.
+
 ## 2026.8.0 (2026-08-05)
 
 ### Added
