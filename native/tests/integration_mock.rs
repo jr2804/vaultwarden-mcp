@@ -14,7 +14,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use vaultwarden_mcp::VaultwardenSession;
 
-use common::{TEST_EMAIL, TEST_KDF_ITERATIONS, TEST_PASSWORD, derive_test_keys, login_cipher_json};
+use common::{
+    TEST_EMAIL, TEST_KDF_ITERATIONS, TEST_PASSWORD, card_cipher_json, derive_test_keys,
+    login_cipher_json,
+};
 
 /// Mount the `/identity/connect/token` handler returning a token response
 /// whose `Key` is the protected symmetric key for our test identity.
@@ -266,6 +269,22 @@ fn login_response(
     login_cipher_json(keys, id, name, username, password, uri)
 }
 
+/// Mount `GET /api/ciphers/{id}` returning the raw (encrypted) cipher JSON.
+/// `edit_cipher` fetches this before its full-replace PUT so type-specific
+/// data (card/identity/ssh) survives the edit.
+async fn mount_get_cipher(mock: &MockServer, cipher_json: serde_json::Value) {
+    let id = cipher_json["id"]
+        .as_str()
+        .expect("cipher fixture must carry an id")
+        .to_string();
+    Mock::given(method("GET"))
+        .and(path(format!("/api/ciphers/{id}")))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cipher_json))
+        .mount(mock)
+        .await;
+}
+
 #[tokio::test]
 async fn create_cipher_posts_encrypted_body_and_returns_entry() {
     let mock = MockServer::start().await;
@@ -323,7 +342,10 @@ async fn edit_cipher_overlays_fields_and_put_replaces() {
     let (keys, protected_key) = derive_test_keys();
     let original = login(&keys, "e-1", "Orig", "u1", "p1", "https://o.test");
     mount_token(&mock, &protected_key).await;
-    mount_sync(&mock, &protected_key, vec![original]).await;
+    mount_sync(&mock, &protected_key, vec![original.clone()]).await;
+
+    // edit_cipher fetches the raw cipher first, then PUTs the merged body.
+    mount_get_cipher(&mock, original).await;
 
     Mock::given(method("PUT"))
         .and(path("/api/ciphers/e-1"))
@@ -365,7 +387,9 @@ async fn edit_cipher_can_clear_a_field_with_some_none() {
     let (keys, protected_key) = derive_test_keys();
     let original = login(&keys, "c-1", "C", "keep", "clear-me", "https://c.test");
     mount_token(&mock, &protected_key).await;
-    mount_sync(&mock, &protected_key, vec![original]).await;
+    mount_sync(&mock, &protected_key, vec![original.clone()]).await;
+
+    mount_get_cipher(&mock, original).await;
 
     Mock::given(method("PUT"))
         .and(path("/api/ciphers/c-1"))
@@ -753,13 +777,11 @@ async fn edit_cipher_moves_to_folder() {
 
     // Seed a folder so it's already cached.
     let folder = folder_response(&keys, "target-f", "Target");
-    mount_sync_with_folders(
-        &mock,
-        &protected_key,
-        vec![login(&keys, "c-move", "MoveMe", "u", "p", "https://m.test")],
-        vec![folder],
-    )
-    .await;
+    let cipher = login(&keys, "c-move", "MoveMe", "u", "p", "https://m.test");
+    mount_sync_with_folders(&mock, &protected_key, vec![cipher.clone()], vec![folder]).await;
+
+    // edit_cipher fetches the raw cipher before the PUT.
+    mount_get_cipher(&mock, cipher).await;
 
     // get_cipher -> returns the cipherfrom sync; PUT returns the updated cipher.
     Mock::given(method("PUT"))
@@ -800,20 +822,17 @@ async fn edit_cipher_clears_folder_with_null() {
 
     // Seed a cipher in a folder and a cipher with no folder.
     let folder_json = folder_response(&keys, "f-old", "Old");
+    let cipher = login(&keys, "c-clear", "ClearMe", "u", "p", "https://c.test");
     mount_sync_with_folders(
         &mock,
         &protected_key,
-        vec![login(
-            &keys,
-            "c-clear",
-            "ClearMe",
-            "u",
-            "p",
-            "https://c.test",
-        )],
+        vec![cipher.clone()],
         vec![folder_json],
     )
     .await;
+
+    // edit_cipher fetches the raw cipher before the PUT.
+    mount_get_cipher(&mock, cipher).await;
 
     Mock::given(method("PUT"))
         .and(path("/api/ciphers/c-clear"))
@@ -849,6 +868,129 @@ async fn edit_cipher_clears_folder_with_null() {
 
     assert_eq!(entry_after.folder, None);
     assert_eq!(entry_after.folder_id, None);
+}
+
+#[tokio::test]
+async fn edit_cipher_on_card_moves_folder_and_preserves_card_data() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    let card = card_cipher_json(
+        &keys,
+        "card-1",
+        "Amex Business",
+        "Jane Doe",
+        "4111111111111111",
+        Some("work card"),
+    );
+    let folder = folder_response(&keys, "bf-f", "Banking & Finance");
+    mount_sync_with_folders(&mock, &protected_key, vec![card.clone()], vec![folder]).await;
+
+    // edit_cipher fetches the raw cipher before the PUT.
+    mount_get_cipher(&mock, card.clone()).await;
+
+    Mock::given(method("PUT"))
+        .and(path("/api/ciphers/card-1"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json({
+            let mut r = card.clone();
+            r["folderId"] = serde_json::Value::String("bf-f".into());
+            r
+        }))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    // Only move the folder — the card itself must survive untouched.
+    let entry = session
+        .edit_cipher(
+            "card-1",
+            CipherEdit {
+                folder: Some(Some("Banking & Finance".into())),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("edit card");
+
+    // Type and identity preserved: the card is not silently rewritten as login.
+    assert_eq!(entry.cipher_type, "card");
+    assert_eq!(entry.name, "Amex Business");
+    assert_eq!(entry.folder.as_deref(), Some("Banking & Finance"));
+    assert_eq!(entry.folder_id.as_deref(), Some("bf-f"));
+
+    // The PUT body kept the card object verbatim (still encrypted with the
+    // fixture keys) and carried the new folderId.
+    let put_requests = mock.received_requests().await.expect("received requests");
+    let put = put_requests
+        .iter()
+        .find(|r| r.method == "PUT" && r.url.path() == "/api/ciphers/card-1")
+        .expect("PUT request recorded");
+    let body: serde_json::Value = serde_json::from_slice(&put.body).expect("PUT body json");
+    assert_eq!(body["type"], 3);
+    assert_eq!(body["card"], card["card"]);
+    assert_eq!(body["folderId"], "bf-f");
+}
+
+#[tokio::test]
+async fn edit_cipher_on_card_renames_and_keeps_type() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+
+    let card = card_cipher_json(
+        &keys,
+        "card-2",
+        "Old Name",
+        "Jane Doe",
+        "4111111111111111",
+        None,
+    );
+    mount_sync_with_folders(&mock, &protected_key, vec![card.clone()], vec![]).await;
+    mount_get_cipher(&mock, card.clone()).await;
+
+    // The server returns the renamed card (name re-encrypted with fixture keys).
+    let mut renamed = card.clone();
+    renamed["name"] = serde_json::Value::String(common::encrypt_str("New Name", &keys));
+    Mock::given(method("PUT"))
+        .and(path("/api/ciphers/card-2"))
+        .and(header("authorization", "Bearer test-access-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(renamed))
+        .mount(&mock)
+        .await;
+
+    let session = VaultwardenSession::new(&mock.uri(), "cid", "csec", TEST_PASSWORD, true)
+        .await
+        .expect("connect");
+
+    let entry = session
+        .edit_cipher(
+            "card-2",
+            CipherEdit {
+                name: Some("New Name".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("edit card name");
+
+    assert_eq!(entry.cipher_type, "card");
+    assert_eq!(entry.name, "New Name");
+
+    // Only the name changed; the card object and type are untouched on the wire.
+    let put_requests = mock.received_requests().await.expect("received requests");
+    let put = put_requests
+        .iter()
+        .find(|r| r.method == "PUT" && r.url.path() == "/api/ciphers/card-2")
+        .expect("PUT request recorded");
+    let body: serde_json::Value = serde_json::from_slice(&put.body).expect("PUT body json");
+    assert_eq!(body["type"], 3);
+    assert_eq!(body["card"], card["card"]);
+    assert!(body["name"].as_str().is_some_and(|s| s != "Old Name"));
 }
 
 #[tokio::test]
