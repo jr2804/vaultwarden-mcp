@@ -1022,3 +1022,280 @@ async fn delete_folder_removes_from_cache() {
 
     assert!(session.folder_id_for_name("TrashMe").is_none());
 }
+
+// ── Persistent session-cache tests ────────────────────────────────────────
+
+use std::time::Duration;
+use vaultwarden_mcp::session_cache::SessionCacheOptions;
+
+fn test_cache_options(directory: &std::path::Path, ttl_seconds: u64) -> SessionCacheOptions {
+    SessionCacheOptions::in_directory(directory.to_path_buf(), Duration::from_secs(ttl_seconds))
+}
+
+fn cache_json_files(directory: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(directory)
+        .expect("read cache directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect()
+}
+
+#[tokio::test]
+async fn session_cache_warm_start_skips_login_and_reuses_keys() {
+    let mock = MockServer::start().await;
+    let (keys, protected_key) = derive_test_keys();
+    let cipher = login(
+        &keys,
+        "cached-1",
+        "Cached",
+        "user",
+        "secret",
+        "https://cached.test",
+    );
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![cipher]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+    let options = test_cache_options(directory.path(), 1_800);
+
+    VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options.clone(),
+    )
+    .await
+    .expect("cold cache connect");
+
+    let warm = VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options,
+    )
+    .await
+    .expect("warm cache connect");
+
+    assert_eq!(warm.email(), TEST_EMAIL);
+    assert_eq!(
+        warm.search("cached").await.expect("search")[0].name,
+        "Cached"
+    );
+    let requests = mock.received_requests().await.expect("requests");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.url.path() == "/identity/connect/token")
+            .count(),
+        1,
+        "warm start must not repeat the OAuth login"
+    );
+
+    let files = cache_json_files(directory.path());
+    assert_eq!(files.len(), 1);
+    let contents = std::fs::read_to_string(&files[0]).expect("read cache");
+    assert!(!contents.contains(TEST_PASSWORD));
+    assert!(!contents.contains("csec"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&files[0]).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(directory.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o077,
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn session_cache_rejects_a_different_password() {
+    let mock = MockServer::start().await;
+    let (_, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+    let options = test_cache_options(directory.path(), 1_800);
+
+    VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options.clone(),
+    )
+    .await
+    .expect("cold cache connect");
+
+    let error = VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        "wrong-password",
+        true,
+        "work",
+        options,
+    )
+    .await
+    .err()
+    .expect("wrong password must not use cached keys");
+    assert!(format!("{error:#}").contains("wrong"));
+}
+
+#[tokio::test]
+async fn session_cache_auth_error_invalidates_the_record() {
+    let mock = MockServer::start().await;
+    let (_, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+    let options = test_cache_options(directory.path(), 1_800);
+    let session = VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options,
+    )
+    .await
+    .expect("cold cache connect");
+    assert_eq!(cache_json_files(directory.path()).len(), 1);
+
+    Mock::given(method("POST"))
+        .and(path("/api/ciphers"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": "unauthorized"
+        })))
+        .mount(&mock)
+        .await;
+
+    let error = session
+        .create_cipher(vaultwarden_mcp::CipherInput {
+            cipher_type: vaultwarden_mcp::WriteCipherType::Note,
+            name: "rejected".into(),
+            username: None,
+            password: None,
+            uri: None,
+            totp: None,
+            notes: None,
+            fields: None,
+            folder: None,
+        })
+        .await
+        .expect_err("401 must fail the write");
+    assert!(format!("{error:#}").contains("401 Unauthorized"));
+    assert!(cache_json_files(directory.path()).is_empty());
+}
+
+#[tokio::test]
+async fn session_cache_zero_ttl_disables_persistence() {
+    let mock = MockServer::start().await;
+    let (_, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+
+    VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        test_cache_options(directory.path(), 0),
+    )
+    .await
+    .expect("connect with disabled cache");
+
+    assert!(cache_json_files(directory.path()).is_empty());
+}
+
+#[tokio::test]
+async fn session_cache_expired_record_triggers_fresh_login() {
+    let mock = MockServer::start().await;
+    let (_, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+    let options = test_cache_options(directory.path(), 1_800);
+    VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options.clone(),
+    )
+    .await
+    .expect("cold cache connect");
+
+    let files = cache_json_files(directory.path());
+    let mut record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&files[0]).unwrap()).unwrap();
+    record["saved_at_unix"] = serde_json::json!(1);
+    std::fs::write(&files[0], serde_json::to_vec(&record).unwrap()).unwrap();
+
+    VaultwardenSession::new_with_cache(
+        &mock.uri(),
+        "cid",
+        "csec",
+        TEST_PASSWORD,
+        true,
+        "work",
+        options,
+    )
+    .await
+    .expect("fresh login after TTL expiry");
+
+    let requests = mock.received_requests().await.expect("requests");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.url.path() == "/identity/connect/token")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn session_cache_isolates_accounts_with_the_same_client_id() {
+    let mock = MockServer::start().await;
+    let (_, protected_key) = derive_test_keys();
+    mount_token(&mock, &protected_key).await;
+    mount_sync(&mock, &protected_key, vec![]).await;
+    let directory = tempfile::tempdir().expect("temp cache dir");
+    let options = test_cache_options(directory.path(), 1_800);
+
+    for label in ["work", "personal"] {
+        VaultwardenSession::new_with_cache(
+            &mock.uri(),
+            "shared-client",
+            "csec",
+            TEST_PASSWORD,
+            true,
+            label,
+            options.clone(),
+        )
+        .await
+        .expect("connect");
+    }
+
+    assert_eq!(cache_json_files(directory.path()).len(), 2);
+}

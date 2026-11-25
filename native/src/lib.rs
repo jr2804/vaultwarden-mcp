@@ -3,12 +3,14 @@
 //! Provides the vaultwarden API client wrapper and crypto types needed
 //! by the MCP server, all using the vaultwarden-cli library.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use vaultwarden_cli::models::{
-    Cipher, CipherData, FieldType, Folder, KdfType, SyncResponse, TokenResponse,
+use session_cache::{
+    AuthState, SessionCache, SessionCacheOptions, encrypted_key_hash, is_auth_error, unix_timestamp,
 };
+use vaultwarden_cli::models::{Cipher, CipherData, FieldType, Folder, SyncResponse, TokenResponse};
 use vaultwarden_cli::{
     api::ApiClient,
     crypto::{CryptoKeys, KdfIterations, MasterKey},
@@ -19,12 +21,17 @@ pub mod config;
 pub mod crypto;
 pub mod mcp;
 pub mod secrets;
+pub mod session_cache;
 
 /// A connected vaultwarden session with decrypted cipher access.
 pub struct VaultwardenSession {
     api: Arc<ApiClient>,
-    access_token: String,
+    auth: tokio::sync::RwLock<Option<AuthState>>,
+    client_id: String,
+    client_secret: String,
+    cache: SessionCache,
     email: String,
+    encrypted_key_hash: [u8; 32],
     server_url: String,
     crypto_keys: CryptoKeys,
     ciphers: tokio::sync::RwLock<Vec<CipherEntry>>,
@@ -80,71 +87,187 @@ impl VaultwardenSession {
         password: &str,
         allow_http: bool,
     ) -> Result<Self> {
+        Self::new_with_cache(
+            server,
+            client_id,
+            client_secret,
+            password,
+            allow_http,
+            "default",
+            SessionCacheOptions::disabled(),
+        )
+        .await
+    }
+
+    /// Connect using an optional persistent token/key cache.
+    pub async fn new_with_cache(
+        server: &str,
+        client_id: &str,
+        client_secret: &str,
+        password: &str,
+        allow_http: bool,
+        label: &str,
+        cache_options: SessionCacheOptions,
+    ) -> Result<Self> {
         let api = Arc::new(
             ApiClient::new_with_flags(server, allow_http).context("failed to create API client")?,
         );
         let server_url = server.to_string();
+        let cache = SessionCache::new(cache_options, server, client_id, label, password);
+        let now = unix_timestamp()?;
+        let mut cached = match cache.load() {
+            Ok(cached) => cached,
+            Err(error) => {
+                tracing::warn!("ignoring session cache for account '{label}': {error:#}");
+                None
+            }
+        };
+        let mut refreshed = false;
 
-        // 1. Authenticate
+        let (auth, sync, crypto_keys, encrypted_key, from_cache) = loop {
+            let Some(mut current) = cached.take() else {
+                let (auth, sync, crypto_keys, encrypted_key) =
+                    Self::authenticate_and_sync(&api, client_id, client_secret, password).await?;
+                break (auth, sync, crypto_keys, encrypted_key, false);
+            };
+
+            if current.auth.needs_refresh(now) {
+                let refresh_token = current.auth.refresh_token.clone();
+                let Some(refresh_token) = refresh_token else {
+                    cache
+                        .invalidate()
+                        .context("failed to invalidate session cache")?;
+                    cached = None;
+                    continue;
+                };
+                match api.refresh_token(&refresh_token).await {
+                    Ok(token) => {
+                        current.auth = AuthState::from_token(&token, Some(refresh_token))?;
+                        refreshed = true;
+                    }
+                    Err(error) if is_auth_error(&error) => {
+                        cache
+                            .invalidate()
+                            .context("failed to invalidate session cache")?;
+                        cached = None;
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(error).context("failed to refresh vaultwarden session");
+                    }
+                }
+            }
+
+            match api.sync(&current.auth.access_token).await {
+                Ok(sync)
+                    if sync.profile.email == current.email
+                        && sync.profile.key.as_deref().is_some_and(|key| {
+                            encrypted_key_hash(key) == current.encrypted_key_hash
+                        }) =>
+                {
+                    let encrypted_key = sync
+                        .profile
+                        .key
+                        .clone()
+                        .ok_or_else(|| anyhow::anyhow!("no encrypted key in profile"))?;
+                    break (current.auth, sync, current.crypto_keys, encrypted_key, true);
+                }
+                Ok(_) => {
+                    cache
+                        .invalidate()
+                        .context("failed to invalidate session cache")?;
+                    cached = None;
+                }
+                Err(error) if is_auth_error(&error) => {
+                    cache
+                        .invalidate()
+                        .context("failed to invalidate session cache")?;
+                    cached = None;
+                }
+                Err(error) => {
+                    return Err(error).context("failed to sync vault — cached session");
+                }
+            }
+        };
+
+        let email = sync.profile.email.clone();
+        let encrypted_key_hash = encrypted_key_hash(&encrypted_key);
+        let folder_entries = Self::decrypt_folders(&sync.folders, &crypto_keys);
+        let entries =
+            Self::decrypt_ciphers_with_folders(&sync.ciphers, &crypto_keys, &folder_entries);
+        let folder_count = folder_entries.len();
+        if from_cache {
+            tracing::info!(
+                "vault restored from session cache: {}@{} ({} ciphers, {} folders decrypted)",
+                email,
+                server_url,
+                entries.len(),
+                folder_count
+            );
+        } else {
+            tracing::info!(
+                "vault verification OK: {}@{} ({} ciphers, {} folders decrypted)",
+                email,
+                server_url,
+                entries.len(),
+                folder_count
+            );
+        }
+
+        if (!from_cache || refreshed)
+            && let Err(error) = cache.save(&auth, &email, encrypted_key_hash, &crypto_keys)
+        {
+            tracing::warn!("failed to persist session cache for account '{label}': {error:#}");
+        }
+
+        Ok(Self {
+            api,
+            auth: tokio::sync::RwLock::new(Some(auth)),
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+            cache,
+            email,
+            encrypted_key_hash,
+            server_url,
+            crypto_keys,
+            ciphers: tokio::sync::RwLock::new(entries),
+            folders: tokio::sync::RwLock::new(folder_entries),
+        })
+    }
+
+    async fn authenticate_and_sync(
+        api: &ApiClient,
+        client_id: &str,
+        client_secret: &str,
+        password: &str,
+    ) -> Result<(AuthState, SyncResponse, CryptoKeys, String)> {
         let token: TokenResponse = api
             .login(client_id, client_secret)
             .await
             .context("failed to authenticate (client_credentials) with vaultwarden")?;
-
-        let access_token = token.access_token.clone();
-        let _kdf = token.kdf.unwrap_or(KdfType::Pbkdf2);
+        let auth = AuthState::from_token(&token, None)?;
         let kdf_iterations = token.kdf_iterations.unwrap_or(600_000);
 
-        // 2. Sync to fetch vault data
         let sync: SyncResponse = api
-            .sync(&access_token)
+            .sync(&auth.access_token)
             .await
             .context("failed to sync vault — credential verification step")?;
-
         let email = sync.profile.email.clone();
-
-        // 3. Derive master key from password + email + kdf iterations
         let master_key = MasterKey::derive(
             password,
             &email,
             KdfIterations::new(kdf_iterations)
                 .ok_or_else(|| anyhow::anyhow!("invalid KDF iterations: {}", kdf_iterations))?,
         );
-
-        // 4. Decrypt encrypted symmetric key (verifies password — HMAC check)
         let encrypted_key = sync
             .profile
             .key
-            .as_deref()
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("no encrypted key in profile"))?;
-        let crypto_keys = master_key.decrypt_symmetric_key(encrypted_key).context(
+        let crypto_keys = master_key.decrypt_symmetric_key(&encrypted_key).context(
             "failed to decrypt symmetric key — vault password is wrong (HMAC verification)",
         )?;
-
-        // 5. Decrypt folders from sync
-        let folder_entries = Self::decrypt_folders(&sync.folders, &crypto_keys);
-
-        // 6. Verify by attempting to decrypt ciphers
-        let entries =
-            Self::decrypt_ciphers_with_folders(&sync.ciphers, &crypto_keys, &folder_entries);
-        let folder_count = folder_entries.len();
-        tracing::info!(
-            "vault verification OK: {}@{} ({} ciphers, {} folders decrypted)",
-            email,
-            server_url,
-            entries.len(),
-            folder_count
-        );
-
-        Ok(Self {
-            api,
-            access_token,
-            email,
-            server_url,
-            crypto_keys,
-            ciphers: tokio::sync::RwLock::new(entries),
-            folders: tokio::sync::RwLock::new(folder_entries),
-        })
+        Ok((auth, sync, crypto_keys, encrypted_key))
     }
 
     /// Decrypt all folders from a sync response.
@@ -190,10 +313,13 @@ impl VaultwardenSession {
         let enc_name = self.encrypt_str(name)?;
         let client = self.write_client()?;
         let body = serde_json::json!({ "name": enc_name });
-        let created =
-            crate::api_write::create_folder(&client, &self.server_url, &self.access_token, &body)
-                .await
-                .context("failed to auto-create folder")?;
+        let created = self
+            .authenticated(|access_token| async move {
+                crate::api_write::create_folder(&client, &self.server_url, &access_token, &body)
+                    .await
+            })
+            .await
+            .context("failed to auto-create folder")?;
 
         let folder_id = created["id"]
             .as_str()
@@ -401,6 +527,93 @@ fn decrypt_str(keys: &CryptoKeys, encrypted: &str) -> Option<String> {
 }
 
 impl VaultwardenSession {
+    async fn persist_auth(&self, auth: &AuthState) {
+        if let Err(error) = self.cache.save(
+            auth,
+            &self.email,
+            self.encrypted_key_hash,
+            &self.crypto_keys,
+        ) {
+            tracing::warn!("failed to persist refreshed session cache: {error:#}");
+        }
+    }
+
+    async fn ensure_access_token(&self) -> Result<String> {
+        let now = unix_timestamp()?;
+        {
+            let auth = self.auth.read().await;
+            if let Some(auth) = auth.as_ref()
+                && !auth.needs_refresh(now)
+            {
+                return Ok(auth.access_token.clone());
+            }
+        }
+
+        let mut auth = self.auth.write().await;
+        if let Some(current) = auth.as_ref()
+            && !current.needs_refresh(now)
+        {
+            return Ok(current.access_token.clone());
+        }
+
+        let current = auth.clone();
+        let result = if let Some(refresh_token) = current
+            .as_ref()
+            .and_then(|current| current.refresh_token.as_deref())
+        {
+            self.api.refresh_token(refresh_token).await
+        } else {
+            self.api.login(&self.client_id, &self.client_secret).await
+        };
+        match result {
+            Ok(token) => {
+                let previous_refresh = current.and_then(|current| current.refresh_token);
+                let updated = match AuthState::from_token(&token, previous_refresh) {
+                    Ok(updated) => updated,
+                    Err(error) => {
+                        if let Err(error) = self.cache.invalidate() {
+                            tracing::warn!("failed to invalidate session cache: {error:#}");
+                        }
+                        *auth = None;
+                        return Err(error);
+                    }
+                };
+                self.persist_auth(&updated).await;
+                let access_token = updated.access_token.clone();
+                *auth = Some(updated);
+                Ok(access_token)
+            }
+            Err(error) if is_auth_error(&error) => {
+                if let Err(error) = self.cache.invalidate() {
+                    tracing::warn!("failed to invalidate session cache: {error:#}");
+                }
+                *auth = None;
+                Err(error).context("vaultwarden session authentication expired")
+            }
+            Err(error) => Err(error).context("failed to renew vaultwarden session"),
+        }
+    }
+
+    async fn authenticated<T, F, Fut>(&self, request: F) -> Result<T>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = Result<T>>,
+    {
+        let access_token = self.ensure_access_token().await?;
+        match request(access_token).await {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                if is_auth_error(&error) {
+                    if let Err(error) = self.cache.invalidate() {
+                        tracing::warn!("failed to invalidate session cache: {error:#}");
+                    }
+                    *self.auth.write().await = None;
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Search ciphers by name, URI, or username (case-insensitive)
     pub async fn search(&self, query: &str) -> Result<Vec<CipherEntry>> {
         let lower = query.to_lowercase();
@@ -437,8 +650,7 @@ impl VaultwardenSession {
     /// Synchronize the vault and return a summary with decrypted ciphers
     pub async fn sync(&self) -> Result<SyncSummary> {
         let sync_resp: SyncResponse = self
-            .api
-            .sync(&self.access_token)
+            .authenticated(|access_token| async move { self.api.sync(&access_token).await })
             .await
             .context("failed to sync vault")?;
         let entries = Self::decrypt_ciphers(&sync_resp.ciphers, &self.crypto_keys);
@@ -718,10 +930,13 @@ impl VaultwardenSession {
             let fid = self.ensure_folder_id(folder_name).await?;
             body["folderId"] = serde_json::Value::String(fid);
         }
-        let created =
-            crate::api_write::create_cipher(&client, &self.server_url, &self.access_token, &body)
-                .await
-                .context("failed to create cipher")?;
+        let created = self
+            .authenticated(|access_token| async move {
+                crate::api_write::create_cipher(&client, &self.server_url, &access_token, &body)
+                    .await
+            })
+            .await
+            .context("failed to create cipher")?;
         self.refresh_after_write(created).await
     }
 
@@ -735,17 +950,22 @@ impl VaultwardenSession {
     /// editing work for every cipher type — not just login/note.
     pub async fn edit_cipher(&self, cipher_id: &str, edit: CipherEdit) -> Result<CipherEntry> {
         let client = self.write_client()?;
+        let read_client = client.clone();
 
         // 1. Fetch the current cipher verbatim (fields still encrypted). This
         //    preserves the type discriminator and all type-specific data.
-        let mut body = crate::api_write::get_cipher_raw(
-            &client,
-            &self.server_url,
-            &self.access_token,
-            cipher_id,
-        )
-        .await
-        .with_context(|| format!("failed to fetch cipher '{cipher_id}' for edit"))?;
+        let mut body = self
+            .authenticated(|access_token| async move {
+                crate::api_write::get_cipher_raw(
+                    &read_client,
+                    &self.server_url,
+                    &access_token,
+                    cipher_id,
+                )
+                .await
+            })
+            .await
+            .with_context(|| format!("failed to fetch cipher '{cipher_id}' for edit"))?;
 
         let cipher_type = body.get("type").and_then(|v| v.as_u64()).unwrap_or(1) as u8;
 
@@ -820,15 +1040,19 @@ impl VaultwardenSession {
         }
 
         // 3. Full-replace PUT with the merged body.
-        let updated = crate::api_write::edit_cipher(
-            &client,
-            &self.server_url,
-            &self.access_token,
-            cipher_id,
-            &body,
-        )
-        .await
-        .context("failed to edit cipher")?;
+        let updated = self
+            .authenticated(|access_token| async move {
+                crate::api_write::edit_cipher(
+                    &client,
+                    &self.server_url,
+                    &access_token,
+                    cipher_id,
+                    &body,
+                )
+                .await
+            })
+            .await
+            .context("failed to edit cipher")?;
         self.refresh_after_write(updated).await
     }
 
@@ -838,18 +1062,22 @@ impl VaultwardenSession {
         // The /delete endpoint expects the current cipher body (type + name).
         let current = self.get_cipher(cipher_id).await?;
         let body = serde_json::json!({
-"type": cipher_type_u8(&current.cipher_type),
+        "type": cipher_type_u8(&current.cipher_type),
             "name": self.encrypt_str(&current.name)?,
         });
-        let updated = crate::api_write::soft_delete_cipher(
-            &client,
-            &self.server_url,
-            &self.access_token,
-            cipher_id,
-            &body,
-        )
-        .await
-        .context("failed to soft-delete cipher")?;
+        let updated = self
+            .authenticated(|access_token| async move {
+                crate::api_write::soft_delete_cipher(
+                    &client,
+                    &self.server_url,
+                    &access_token,
+                    cipher_id,
+                    &body,
+                )
+                .await
+            })
+            .await
+            .context("failed to soft-delete cipher")?;
         // refresh_after_write drops the cipher from the active cache because the
         // server returns it with a deletedDate.
         self.refresh_after_write(updated).await
@@ -861,29 +1089,36 @@ impl VaultwardenSession {
         let current = self.get_cipher(cipher_id).await.ok();
         let body = match current {
             Some(c) => serde_json::json!({
-"type": cipher_type_u8(&c.cipher_type),
+            "type": cipher_type_u8(&c.cipher_type),
                 "name": self.encrypt_str(&c.name)?,
             }),
             None => serde_json::json!({}),
         };
-        let updated = crate::api_write::restore_cipher(
-            &client,
-            &self.server_url,
-            &self.access_token,
-            cipher_id,
-            &body,
-        )
-        .await
-        .context("failed to restore cipher")?;
+        let updated = self
+            .authenticated(|access_token| async move {
+                crate::api_write::restore_cipher(
+                    &client,
+                    &self.server_url,
+                    &access_token,
+                    cipher_id,
+                    &body,
+                )
+                .await
+            })
+            .await
+            .context("failed to restore cipher")?;
         self.refresh_after_write(updated).await
     }
 
     /// Hard-delete a cipher (permanent). Returns `Ok(())`.
     pub async fn delete_cipher(&self, cipher_id: &str) -> Result<()> {
         let client = self.write_client()?;
-        crate::api_write::delete_cipher(&client, &self.server_url, &self.access_token, cipher_id)
-            .await
-            .context("failed to hard-delete cipher")?;
+        self.authenticated(|access_token| async move {
+            crate::api_write::delete_cipher(&client, &self.server_url, &access_token, cipher_id)
+                .await
+        })
+        .await
+        .context("failed to hard-delete cipher")?;
         let mut ciphers = self.ciphers.write().await;
         ciphers.retain(|c| c.id != cipher_id);
         Ok(())
@@ -894,10 +1129,13 @@ impl VaultwardenSession {
         let enc_name = self.encrypt_str(name)?;
         let client = self.write_client()?;
         let body = serde_json::json!({ "name": enc_name });
-        let created =
-            crate::api_write::create_folder(&client, &self.server_url, &self.access_token, &body)
-                .await
-                .context("failed to create folder")?;
+        let created = self
+            .authenticated(|access_token| async move {
+                crate::api_write::create_folder(&client, &self.server_url, &access_token, &body)
+                    .await
+            })
+            .await
+            .context("failed to create folder")?;
 
         let folder_id = created["id"]
             .as_str()
@@ -922,16 +1160,21 @@ impl VaultwardenSession {
             .ok_or_else(|| anyhow::anyhow!("folder not found: {}", name))?;
         let enc_name = self.encrypt_str(new_name)?;
         let client = self.write_client()?;
+        let request_folder_id = folder_id.clone();
         let body = serde_json::json!({ "name": enc_name });
-        let _updated = crate::api_write::rename_folder(
-            &client,
-            &self.server_url,
-            &self.access_token,
-            &folder_id,
-            &body,
-        )
-        .await
-        .context("failed to rename folder")?;
+        let _updated = self
+            .authenticated(|access_token| async move {
+                crate::api_write::rename_folder(
+                    &client,
+                    &self.server_url,
+                    &access_token,
+                    &request_folder_id,
+                    &body,
+                )
+                .await
+            })
+            .await
+            .context("failed to rename folder")?;
 
         let decrypted_name =
             decrypt_str(&self.crypto_keys, &enc_name).unwrap_or_else(|| new_name.to_string());
@@ -953,9 +1196,18 @@ impl VaultwardenSession {
             .folder_id_for_name(name)
             .ok_or_else(|| anyhow::anyhow!("folder not found: {}", name))?;
         let client = self.write_client()?;
-        crate::api_write::delete_folder(&client, &self.server_url, &self.access_token, &folder_id)
+        let request_folder_id = folder_id.clone();
+        self.authenticated(|access_token| async move {
+            crate::api_write::delete_folder(
+                &client,
+                &self.server_url,
+                &access_token,
+                &request_folder_id,
+            )
             .await
-            .context("failed to delete folder")?;
+        })
+        .await
+        .context("failed to delete folder")?;
         let mut folders = self.folders.write().await;
         folders.retain(|f| f.id != folder_id);
         Ok(())

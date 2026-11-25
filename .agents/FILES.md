@@ -16,6 +16,7 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | **Production entry (Rust)** | [`native/src/main.rs`](../native/src/main.rs) | CLI args, transport selection, config-file loader |
 | **MCP server handlers** | [`native/src/mcp.rs`](../native/src/mcp.rs) | `ServerHandler` impl, read + write tool list |
 | **Vault client + crypto** | [`native/src/lib.rs`](../native/src/lib.rs) | `VaultwardenSession`, key derivation, decrypt, write methods |
+| **Persistent session cache** | [`native/src/session_cache.rs`](../native/src/session_cache.rs) | Cache path/format, TTL, password verifier, token/key persistence |
 | **Field encryption** | [`native/src/crypto.rs`](../native/src/crypto.rs) | production symmetric encrypt for vault writes |
 | **Write HTTP client** | [`native/src/api_write.rs`](../native/src/api_write.rs) | POST/PUT/DELETE on `/api/ciphers` |
 | **secretspec resolver** | [`native/src/secrets.rs`](../native/src/secrets.rs) | secretspec 0.18 manifest load + `secret://` value lookup |
@@ -47,6 +48,8 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | `VAULTWARDEN_PASSWORD` | Master password (HMAC-verified on connect) | yes |
 | `VAULTWARDEN_ACCOUNT_NAME` | Logical account label | no (default: `default`) |
 | `VAULTWARDEN_ALLOW_HTTP` | Permit `http://` servers | no (only for local/test) |
+| `VAULTWARDEN_SESSION_CACHE_TTL` | Persistent token/key cache lifetime in seconds; `0` disables | no (default: `1800`) |
+| `VAULTWARDEN_MCP_CACHE_DIR` | Session-cache directory override | no |
 | `VAULTWARDEN_ACCOUNTS` | Comma list of accounts for multi-account mode | no |
 | `VAULTWARDEN_ACCOUNT_<NAME>_*` | Per-account overrides for the vars above | conditional |
 

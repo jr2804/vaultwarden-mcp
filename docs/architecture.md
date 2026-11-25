@@ -54,35 +54,58 @@ operations.
 ## Data Flow
 
 1. **Startup** → Load `vaultwarden-mcp.toml`, resolve any `secret://` references via secretspec (fail fast if a required secret is missing), merge with env vars
-2. **Connect** → One `VaultwardenSession` per account: authenticate (client_credentials) → sync → derive master key → decrypt symmetric key → decrypt all ciphers (abort on HMAC failure)
+2. **Connect** → One `VaultwardenSession` per account: load a valid
+   owner-only token/key cache when available (refresh if needed) → sync → reuse
+   the derived key, or perform client-credentials login → sync → PBKDF2 →
+   decrypt symmetric key on a cold cache (wrong password aborts via the
+   verifier/HMAC check) → decrypt all ciphers
 3. **Client connects** → Rust binary via stdio (subprocess) or HTTP
 4. **`initialize` handshake** → Server advertises tools:
    - **Read**: `search`, `get_cipher`, `sync`, `list_accounts`
    - **Write**: `create_cipher`, `edit_cipher`, `soft_delete_cipher`, `delete_cipher`, `restore_cipher`
    - **Folders**: `list_folders`, `get_folder_id`, `create_folder`, `edit_folder`, `delete_folder`
 5. **Read tool call** → decrypts in-memory from the cached sync; `get_cipher` and `search` never re-hit the server
-6. **Write tool call** → encrypt each field with the session symmetric key → POST/PUT/DELETE to `/api/ciphers` → splice the returned cipher into the in-memory cache (so the next `search` reflects it immediately)
-7. **Folder auto-create** → `create_cipher`/`edit_cipher` resolve a `folder` name to its id; a name that doesn't exist is created via `POST /api/folders` (write-locked), and the folder is spliced into the in-session folder cache
+6. **Write tool call** → encrypt each field with the session symmetric key →
+   POST/PUT/DELETE to `/api/ciphers` → splice the returned cipher into the
+   in-memory cache (so the next `search` reflects it immediately)
+7. **Folder auto-create** → `create_cipher`/`edit_cipher` resolve a `folder` name
+   to its id; a name that doesn't exist is created via `POST /api/folders`
+   (write-locked), and the folder is spliced into the in-session folder cache
 
 ### Credential verification (step 2 detail)
 
-On login, each `VaultwardenSession`:
+On a cold cache, each `VaultwardenSession`:
 
 - Auth via `client_credentials` grant → access token
 - Sync vault → profile email
 - Derive master key via PBKDF2(password, email, kdf_iterations)
 - Decrypt vault key → `CryptoKeys` (HMAC-verified — wrong password aborts here)
 - Test-decrypt all ciphers (abort on HMAC failure)
+- Persist only short-lived tokens, the derived symmetric key, and a password verifier in an owner-only cache
+
+On a warm cache, the password verifier is checked first. The session refreshes an
+expiring access token, syncs current vault contents, validates the account email
+and encrypted-key fingerprint, and reuses `CryptoKeys` without repeating the
+password KDF.
 
 ## Security Model
 
-- **No plaintext secrets persisted** — all cipher operations decrypt in-memory only
+- **No plaintext vault contents persisted** — cipher operations decrypt
+  in-memory only; the optional session cache stores short-lived tokens and
+  derived vault keys, never vault entries
 - **Credential verification at connect time** — wrong password or credential
-  mismatch caught immediately via HMAC check on symmetric key
+  mismatch caught immediately via the cache password verifier or HMAC check on
+  the symmetric key
 - **Per-account sessions** — isolated `VaultwardenSession` per identity, multi-account via session pool
 - **Metadata-only in search** — `search` decrypts name + username only; full decrypt requires `get_cipher` by ID
-- **Secrets never touch disk** — `secret://` references resolve via secretspec at startup into memory; the resolved values are passed straight to the session and never logged (`print-config` redacts them as `***`)
-- **Write path mirrors read crypto** — `crypto.rs::encrypt_string` uses the same AES-256-CBC + HMAC-SHA256 envelope the read path decrypts, with a fresh random IV per field; round-trip is verified against the upstream `CryptoKeys::decrypt_to_string` in tests
+- **Secret resolution stays in memory** — `secret://` references resolve via
+  secretspec at startup into memory; resolved values are never logged
+  (`print-config` redacts them as `***`). The master password and client secret
+  are never written to the session cache
+- **Write path mirrors read crypto** — `crypto.rs::encrypt_string` uses the same
+  AES-256-CBC + HMAC-SHA256 envelope the read path decrypts, with a fresh random
+  IV per field; round-trip is verified against the upstream
+  `CryptoKeys::decrypt_to_string` in tests
 
 ## Dependencies
 

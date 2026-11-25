@@ -29,6 +29,8 @@ The first file found wins; later candidates are ignored.
 | `VAULTWARDEN_PASSWORD` | Vault master password |
 | `VAULTWARDEN_ACCOUNT_NAME` | Optional label (default `default`) |
 | `VAULTWARDEN_ALLOW_HTTP` | `1` / `true` to allow `http://` (dev only) |
+| `VAULTWARDEN_SESSION_CACHE_TTL` | Session-cache lifetime in seconds (default `1800`; `0` disables persistence) |
+| `VAULTWARDEN_MCP_CACHE_DIR` | Exact directory for persistent session-cache files |
 
 Env vars **override** the config file on a per-field basis, so you can keep
 non-secret values in the TOML and inject only the secret ones via env.
@@ -144,11 +146,11 @@ vaultwarden-mcp serve --secretspec-provider dotenv:./secrets.env
 
 ### Verifying without starting the server
 
-`print-config` resolves everything (including `secret://` refs) and logs the
+`print-config` resolves everything (including `secret://` refs) and emits the
 effective config with secrets redacted as `***` — a quick way to confirm your
-manifest and provider are wired correctly. Output is emitted through `tracing`
-to stderr (see [Log level](#log-level) below); the default `info` level means
-the dump appears out of the box.
+manifest and provider are wired correctly. The default text output is emitted
+through `tracing` to stdout (see [Log level](#log-level) below); the default
+`info` level means the dump appears out of the box.
 
 ```bash
 vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
@@ -170,16 +172,83 @@ vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
 2026-10-07T12:00:00.000012Z  INFO  vaultwarden_mcp:     allow_http:    false
 ```
 
-To suppress startup/config output (e.g. for scripting), raise the log level:
+For scripts, use `--format json` for compact output or `--format json-pretty`
+for indented output:
+
+```bash
+vaultwarden-mcp print-config --format json --config ./vaultwarden-mcp.toml
+vaultwarden-mcp print-config --format json-pretty --config ./vaultwarden-mcp.toml
+```
+
+Both JSON formats write an array to stdout with exactly these fields per
+account: `label`, `server`, `client_id`, `client_secret`, `password`, and
+`allow_http`. The two secret fields are always `***`. JSON output is not routed
+through `tracing`, so `RUST_LOG` does not suppress or decorate it.
+
+```json
+[
+  {
+    "label": "human",
+    "server": "https://vault.example.com",
+    "client_id": "user.human",
+    "client_secret": "***",
+    "password": "***",
+    "allow_http": false
+  }
+]
+```
+
+To suppress the default text output (e.g. when running manually), raise the
+log level:
 
 ```bash
 RUST_LOG=warn vaultwarden-mcp print-config --config ./vaultwarden-mcp.toml
 ```
 
+## Session cache
+
+By default, `serve` keeps each account's short-lived access/refresh tokens and
+derived vault symmetric key in an owner-only local cache for 30 minutes. A cold
+start performs the normal OAuth login, vault sync, password KDF, and HMAC key
+verification. A warm start validates the password verifier, refreshes the access
+token when needed, syncs the vault, and reuses the derived key instead of
+repeating `/identity/connect/token` and the expensive password KDF. Vault
+contents are never cached on disk.
+
+Control it with `--session-cache-ttl SECONDS` or
+`VAULTWARDEN_SESSION_CACHE_TTL`:
+
+```bash
+# Keep session material for one hour.
+vaultwarden-mcp serve --session-cache-ttl 3600
+
+# Disable cache reads and writes entirely.
+vaultwarden-mcp serve --session-cache-ttl 0
+```
+
+The cache directory is selected in this order:
+
+1. `VAULTWARDEN_MCP_CACHE_DIR` (used exactly as supplied)
+2. `$XDG_CACHE_HOME/vaultwarden-mcp`
+3. `$LOCALAPPDATA/vaultwarden-mcp` on Windows
+4. `~/.cache/vaultwarden-mcp`
+
+On Unix, cache directories are owner-only (`0700`) and files are owner
+read/write only (`0600`). On Windows, files inherit the current user's directory
+ACLs. Each account gets a separate SHA-256-named JSON file keyed by normalized
+server URL, client id, and account label. The master password, client secret,
+master key, and vault contents are never written. The password is still required
+at startup so a changed or incorrect password cannot silently reuse cached keys.
+
+The TTL is absolute from the last successful token save, not sliding. Expired,
+corrupt, mismatched, or insecurely permissioned records are ignored and replaced
+after a successful cold login. A recognized authentication failure (`401` or
+OAuth `invalid_grant`) removes the record; failed mutations are not replayed.
+
 ## Log level
 
-All startup and runtime diagnostics — including `print-config` output and the
-HTTP `Listening on …` banner — go through the
+All startup and runtime diagnostics — including the default text
+`print-config` output and the HTTP `Listening on …` banner — go through the
 [`tracing`](https://docs.rs/tracing) crate and respect the `RUST_LOG`
 environment variable. When `RUST_LOG` is **unset**, the default is `info`, so
 informational messages appear out of the box.
