@@ -18,4 +18,8 @@ Acts as simple long-term memory for the project.
 
 ## Entries
 
-[None yet — add entries as decisions are made.]
+| Date | Decision | Rationale | Git ref |
+|------|----------|-----------|---------|
+| 2026-11-25 | Use mise platform fragments; default Windows x64 to GNU | Conda provides GCC/binutils; release stays MSVC pending GNU validation. | db7b88d |
+| 2026-11-25 | Add redacted `print-config` JSON formats | Preserve text output while enabling scripted config inspection. | 621e0dd |
+| 2026-11-25 | Persist an owner-only session token/key cache | Reuse authentication while retaining password verification and auth invalidation. | 621e0dd |

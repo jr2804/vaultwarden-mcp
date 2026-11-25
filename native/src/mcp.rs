@@ -10,7 +10,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::{CipherEdit, CipherInput, VaultwardenSession};
+use crate::{CipherEdit, CipherInput, VaultwardenSession, session_cache::SessionCacheOptions};
 
 /// Account configuration for connecting to a Vaultwarden instance.
 #[derive(Debug, Clone)]
@@ -114,14 +114,23 @@ pub struct VaultwardenMcpServer {
 
 impl VaultwardenMcpServer {
     pub async fn new(configs: Vec<AccountConfig>) -> Result<Self, McpError> {
+        Self::with_cache(configs, SessionCacheOptions::disabled()).await
+    }
+
+    pub async fn with_cache(
+        configs: Vec<AccountConfig>,
+        cache: SessionCacheOptions,
+    ) -> Result<Self, McpError> {
         let mut sessions = Vec::with_capacity(configs.len());
         for config in configs {
-            let session = VaultwardenSession::new(
+            let session = VaultwardenSession::new_with_cache(
                 &config.server,
                 &config.client_id,
                 &config.client_secret,
                 &config.password,
                 config.allow_http,
+                &config.label,
+                cache.clone(),
             )
             .await
             .map_err(|e| {

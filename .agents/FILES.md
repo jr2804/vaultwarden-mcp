@@ -16,6 +16,7 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | **Production entry (Rust)** | [`native/src/main.rs`](../native/src/main.rs) | CLI args, transport selection, config-file loader |
 | **MCP server handlers** | [`native/src/mcp.rs`](../native/src/mcp.rs) | `ServerHandler` impl, read + write tool list |
 | **Vault client + crypto** | [`native/src/lib.rs`](../native/src/lib.rs) | `VaultwardenSession`, key derivation, decrypt, write methods |
+| **Persistent session cache** | [`native/src/session_cache.rs`](../native/src/session_cache.rs) | Cache path/format, TTL, password verifier, token/key persistence |
 | **Field encryption** | [`native/src/crypto.rs`](../native/src/crypto.rs) | production symmetric encrypt for vault writes |
 | **Write HTTP client** | [`native/src/api_write.rs`](../native/src/api_write.rs) | POST/PUT/DELETE on `/api/ciphers` |
 | **secretspec resolver** | [`native/src/secrets.rs`](../native/src/secrets.rs) | secretspec 0.18 manifest load + `secret://` value lookup |
@@ -30,6 +31,8 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | **Package metadata** | [`pyproject.toml`](../pyproject.toml) | `name`, `version`, pytest config |
 | **Lint config** | [`ruff.toml`](../ruff.toml), [`ty.toml`](../ty.toml) | line length, target Python |
 | **Tooling tasks** | [`.config/mise/conf.d/*.toml`](../.config/mise/) | `default`, `lint`, `format`, `quality`, `docs`, `mcp`, `skills` |
+| **Mise environment bootstrap** | [`.miserc.toml`](../.miserc.toml) | `auto_env` |
+| **Platform native toolchains** | [`.config/mise/conf.d/native-toolchain/`](../.config/mise/conf.d/native-toolchain/) | `mise.linux.toml`, `mise.windows.toml`, conda GCC/binutils, Windows GNU target |
 | **Docs site config** | [`zensical.toml`](../zensical.toml) | nav, theme, plugins |
 | **User docs** | [`docs/`](../docs/) | `index`, `architecture`, `build`, `contributing` |
 | **Release notes** | [`CHANGELOG.md`](../CHANGELOG.md) | version history |
@@ -45,6 +48,8 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | `VAULTWARDEN_PASSWORD` | Master password (HMAC-verified on connect) | yes |
 | `VAULTWARDEN_ACCOUNT_NAME` | Logical account label | no (default: `default`) |
 | `VAULTWARDEN_ALLOW_HTTP` | Permit `http://` servers | no (only for local/test) |
+| `VAULTWARDEN_SESSION_CACHE_TTL` | Persistent token/key cache lifetime in seconds; `0` disables | no (default: `1800`) |
+| `VAULTWARDEN_MCP_CACHE_DIR` | Session-cache directory override | no |
 | `VAULTWARDEN_ACCOUNTS` | Comma list of accounts for multi-account mode | no |
 | `VAULTWARDEN_ACCOUNT_<NAME>_*` | Per-account overrides for the vars above | conditional |
 
@@ -57,6 +62,7 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | `tests/` | pytest structural checks (pyproject/Cargo/CI shape) |
 | `docs/` | Zensical-rendered user docs |
 | `.config/mise/conf.d/` | Mise task fragments (one file per concern) |
+| `.config/mise/conf.d/native-toolchain/` | OS-specific compiler and Rust target configuration |
 | `.agents/` | DOX markdown (5 tracked files — see [.gitignore](../.gitignore) override) |
 | `.tmp/` | Scratch space (gitignored) |
 

@@ -18,11 +18,13 @@
 //! plus per-account VAULTWARDEN_ACCOUNT_<NAME>_* vars.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 use vaultwarden_mcp::config::{self, AccountConfigFile, ConfigFile};
 use vaultwarden_mcp::mcp::{AccountConfig, VaultwardenMcpServer};
+use vaultwarden_mcp::session_cache::SessionCacheOptions;
 
 /// Vaultwarden MCP server
 #[derive(Parser, Debug)]
@@ -35,6 +37,13 @@ use vaultwarden_mcp::mcp::{AccountConfig, VaultwardenMcpServer};
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+enum PrintFormat {
+    Text,
+    Json,
+    JsonPretty,
 }
 
 #[derive(clap::Subcommand, Debug)]
@@ -65,6 +74,14 @@ enum Commands {
         /// env var or auto-discovery (walking cwd and parent directories).
         #[arg(long, env = "SECRETSPEC_MANIFEST")]
         secretspec_manifest: Option<PathBuf>,
+        /// Persistent session-cache lifetime in seconds (0 disables it).
+        #[arg(
+            long,
+            env = "VAULTWARDEN_SESSION_CACHE_TTL",
+            default_value_t = 1_800,
+            value_name = "SECONDS"
+        )]
+        session_cache_ttl: u64,
     },
     /// Print the effective config (after env-var merge) and exit.
     PrintConfig {
@@ -80,6 +97,9 @@ enum Commands {
         /// Path to a secretspec.toml manifest file.
         #[arg(long, env = "SECRETSPEC_MANIFEST")]
         secretspec_manifest: Option<PathBuf>,
+        /// Output format (default: text).
+        #[arg(long, value_enum, default_value = "text")]
+        format: PrintFormat,
     },
 }
 
@@ -88,8 +108,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
@@ -102,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
             secretspec_profile,
             secretspec_provider,
             secretspec_manifest,
+            session_cache_ttl,
         } => {
             let account_configs = load_accounts(
                 config.as_deref(),
@@ -109,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
                 secretspec_profile,
                 secretspec_manifest.as_deref(),
             )?;
-            let server = VaultwardenMcpServer::new(account_configs).await?;
+            let cache = SessionCacheOptions::from_env(Duration::from_secs(*session_cache_ttl));
+            let server = VaultwardenMcpServer::with_cache(account_configs, cache).await?;
             let n = server.sessions_count().await;
             tracing::info!("Starting vaultwarden-mcp with {} account(s)", n);
 
@@ -124,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
             secretspec_profile,
             secretspec_provider,
             secretspec_manifest,
+            format,
         } => {
             let accounts = load_accounts(
                 config.as_deref(),
@@ -131,14 +153,20 @@ async fn main() -> anyhow::Result<()> {
                 secretspec_profile,
                 secretspec_manifest.as_deref(),
             )?;
-            tracing::info!("vaultwarden-mcp — effective config:");
-            for a in &accounts {
-                tracing::info!("  [{}]", a.label);
-                tracing::info!("    server:        {}", a.server);
-                tracing::info!("    client_id:     {}", a.client_id);
-                tracing::info!("    client_secret: {}", redact(&a.client_secret));
-                tracing::info!("    password:      {}", redact(&a.password));
-                tracing::info!("    allow_http:    {}", a.allow_http);
+            match format {
+                PrintFormat::Text => {
+                    tracing::info!("vaultwarden-mcp — effective config:");
+                    for a in &accounts {
+                        tracing::info!("  [{}]", a.label);
+                        tracing::info!("    server:        {}", a.server);
+                        tracing::info!("    client_id:     {}", a.client_id);
+                        tracing::info!("    client_secret: {}", redact(&a.client_secret));
+                        tracing::info!("    password:      {}", redact(&a.password));
+                        tracing::info!("    allow_http:    {}", a.allow_http);
+                    }
+                }
+                PrintFormat::Json => print_accounts_json(&accounts, false)?,
+                PrintFormat::JsonPretty => print_accounts_json(&accounts, true)?,
             }
         }
     }
@@ -151,6 +179,37 @@ fn redact(s: &str) -> String {
     } else {
         "***".into()
     }
+}
+
+#[derive(serde::Serialize)]
+struct RedactedAccount<'a> {
+    label: &'a str,
+    server: &'a str,
+    client_id: &'a str,
+    client_secret: String,
+    password: String,
+    allow_http: bool,
+}
+
+fn print_accounts_json(accounts: &[AccountConfig], pretty: bool) -> anyhow::Result<()> {
+    let redacted: Vec<RedactedAccount<'_>> = accounts
+        .iter()
+        .map(|a| RedactedAccount {
+            label: &a.label,
+            server: &a.server,
+            client_id: &a.client_id,
+            client_secret: redact(&a.client_secret),
+            password: redact(&a.password),
+            allow_http: a.allow_http,
+        })
+        .collect();
+    let json = if pretty {
+        serde_json::to_string_pretty(&redacted)?
+    } else {
+        serde_json::to_string(&redacted)?
+    };
+    println!("{json}");
+    Ok(())
 }
 
 #[cfg(feature = "http")]

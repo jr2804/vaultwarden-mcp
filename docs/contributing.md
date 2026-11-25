@@ -4,18 +4,23 @@
 
 1. **Fork** the repository
 2. **Clone** your fork locally
-3. **Build** the Rust binary (requires Rust 1.88+):
+3. **Install the managed toolchains** (Rust plus the native C compiler):
 
 ```bash
-cd native
-cargo build
+mise install
 ```
 
-4. **Run tests** — the test suite is Docker-free and needs no live Vaultwarden
+4. **Build** the Rust binary (requires Rust 1.88+):
+
+```bash
+mise exec -- cargo build --manifest-path native/Cargo.toml
+```
+
+5. **Run tests** — the test suite is Docker-free and needs no live Vaultwarden
    server:
 
 ```bash
-cargo test          # Rust tests: unit + Tier 1 crypto round-trip + Tier 2 wiremock integration (native/)
+mise exec -- cargo test --manifest-path native/Cargo.toml
 uv sync --extra dev # install Python scripting env (pytest, ruff, zensical)
 uv run pytest       # Python structural checks (tests/test_template_validation.py)
 ```

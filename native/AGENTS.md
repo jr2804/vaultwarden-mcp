@@ -14,7 +14,8 @@ for writes.
 ## Ownership
 
 - `native/src/main.rs` — CLI entrypoint (`clap`): `serve` + `print-config`
-- `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto, write methods
+- `native/src/lib.rs` — `VaultwardenSession`, REST client, crypto, token renewal, write methods
+- `native/src/session_cache.rs` — owner-only token/derived-key cache, password verifier, TTL and auth-error invalidation
 - `native/src/mcp.rs` — `ServerHandler` impl, tool list, `AccountConfig`, write-tool param structs
 - `native/src/config.rs` — TOML config loader + env-var merge; resolves `secret://NAME` URIs via secretspec
 - `native/src/secrets.rs` — secretspec 0.18 runtime integration (resolve manifest + look up `secret://` values)
@@ -26,15 +27,21 @@ for writes.
 - `native/Cargo.toml` — deps, features (`http` default), `[dev-dependencies]` for tests
 - `native/tests/common/mod.rs` — shared test fixtures (key derivation + cipher encryption helpers)
 - `native/tests/crypto_roundtrip.rs` — **Tier 1**: offline crypto round-trip (no server, no Docker)
+- `native/tests/print_config.rs` — CLI output formats, env merge, and secret redaction
 - `native/tests/integration_mock.rs` — **Tier 2**: wiremock end-to-end against mock
-  `/identity/connect/token`, `/api/sync`, and `/api/ciphers` write endpoints (no Docker)
+  `/identity/connect/token`, `/api/sync`, `/api/ciphers` write endpoints, and
+  persistent session-cache lifecycle (no Docker)
 
 ## Local Contracts
 
 - MCP spec pinned to **2026-07-28 (v3.0)** via `rmcp` v3.1 — no bump without a
   recorded decision in `.agents/HISTORY.md`.
 - No plaintext secrets in code — credentials from `VAULTWARDEN_*` env vars;
-  HMAC-verified on connect, wrong password aborts.
+  HMAC-verified on connect, wrong password aborts. The optional session cache
+  persists only short-lived tokens, derived vault keys, and a password verifier;
+  never persist passwords, client secrets, master keys, or vault contents.
+- Session-cache contract: [docs/configuration.md](../docs/configuration.md#session-cache).
+  Unix files are `0600` and directories `0700`; auth errors invalidate records.
 - `http` feature is default-on; build stdio-only with `--no-default-features`.
 - Config contract: [.agents/plans/01-config.md](../.agents/plans/01-config.md).
 - secretspec contract: `secret://NAME` references resolve at startup via the
