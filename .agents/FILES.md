@@ -30,6 +30,8 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | **Package metadata** | [`pyproject.toml`](../pyproject.toml) | `name`, `version`, pytest config |
 | **Lint config** | [`ruff.toml`](../ruff.toml), [`ty.toml`](../ty.toml) | line length, target Python |
 | **Tooling tasks** | [`.config/mise/conf.d/*.toml`](../.config/mise/) | `default`, `lint`, `format`, `quality`, `docs`, `mcp`, `skills` |
+| **Mise environment bootstrap** | [`.miserc.toml`](../.miserc.toml) | `auto_env` |
+| **Platform native toolchains** | [`.config/mise/conf.d/native-toolchain/`](../.config/mise/conf.d/native-toolchain/) | `mise.linux.toml`, `mise.windows.toml`, conda GCC/binutils, Windows GNU target |
 | **Docs site config** | [`zensical.toml`](../zensical.toml) | nav, theme, plugins |
 | **User docs** | [`docs/`](../docs/) | `index`, `architecture`, `build`, `contributing` |
 | **Release notes** | [`CHANGELOG.md`](../CHANGELOG.md) | version history |
@@ -57,6 +59,7 @@ Kept compact — agents hallucinate less when they know where definitions live.
 | `tests/` | pytest structural checks (pyproject/Cargo/CI shape) |
 | `docs/` | Zensical-rendered user docs |
 | `.config/mise/conf.d/` | Mise task fragments (one file per concern) |
+| `.config/mise/conf.d/native-toolchain/` | OS-specific compiler and Rust target configuration |
 | `.agents/` | DOX markdown (5 tracked files — see [.gitignore](../.gitignore) override) |
 | `.tmp/` | Scratch space (gitignored) |
 

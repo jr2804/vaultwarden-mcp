@@ -13,8 +13,11 @@ binary exposing `search`, `get_cipher`, `sync`, `list_accounts` over MCP v3.0
 ## Quick start
 
 ```bash
+# Managed toolchains (Rust + Linux/Windows native compilers)
+mise install
+
 # Build (Rust binary — production) — also via `mise run server-release`
-cargo build --release --manifest-path native/Cargo.toml
+mise exec -- cargo build --release --manifest-path native/Cargo.toml
 
 # Python scripting env (pytest structural checks, ruff, zensical docs)
 uv sync --extra dev
@@ -31,6 +34,9 @@ mise run format
 uv run zensical serve    # http://localhost:8000
 ```
 
+Run `mise activate` in your shell, or prefix Cargo commands with `mise exec --`,
+to use the repository's platform toolchain.
+
 ## CLI surface
 
 ```bash
@@ -38,7 +44,8 @@ vaultwarden-mcp serve --transport stdio              # default; for Claude Deskt
 vaultwarden-mcp serve --transport http --host 127.0.0.1 --port 8080
 ```
 
-Binary lives at `native/target/release/vaultwarden-mcp` (or `vaultwarden-mcp.exe` on Windows).
+Binary output paths, including the Windows GNU default, are documented in
+[docs/build.md](../docs/build.md).
 The `http` feature is on by default — build stdio-only with
 `cargo build --manifest-path native/Cargo.toml --no-default-features`.
 

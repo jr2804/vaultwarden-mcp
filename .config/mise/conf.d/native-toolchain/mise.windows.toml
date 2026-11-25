@@ -1,0 +1,10 @@
+[tools]
+rust = { version = "latest", targets = ["x86_64-pc-windows-gnu"] }
+"conda:gcc" = "latest"
+"conda:binutils" = "latest"
+
+[env]
+CC = "gcc"
+AR = "ar"
+CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu"
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "gcc"

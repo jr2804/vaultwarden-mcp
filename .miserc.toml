@@ -1,0 +1,2 @@
+# Load mise.<os>.toml files from conf.d directories.
+auto_env = true

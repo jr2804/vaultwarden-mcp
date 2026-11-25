@@ -1,0 +1,7 @@
+[tools]
+"conda:gcc" = "latest"
+"conda:binutils" = "latest"
+
+[env]
+CC = "gcc"
+AR = "ar"

@@ -2,9 +2,10 @@
 
 ## Prerequisites
 
-- **Rust 1.88+** — install via [rustup](https://rustup.rs/)
+- **Rust 1.88+** — install via [rustup](https://rustup.rs/) or mise
 - **Git** — for cloning the repository
 - **C compiler** — for compiling native dependencies (gcc/clang)
+- **mise** (recommended) — manages the Rust toolchain, C compiler, and platform build defaults
 
 ## Clone and Build
 
@@ -15,6 +16,20 @@ cargo build --release
 ```
 
 The binary is at `target/release/vaultwarden-mcp`.
+
+## Managed Toolchain
+
+The repository includes mise configuration for Linux and Windows x86_64:
+
+```bash
+mise install
+mise exec -- cargo build --release --manifest-path native/Cargo.toml
+```
+
+`mise install` installs GCC and GNU binutils through mise's conda backend.
+On Windows x86_64, it also installs `x86_64-pc-windows-gnu` and sets that as
+Cargo's default target. The resulting executable lives at
+`native/target/x86_64-pc-windows-gnu/release/vaultwarden-mcp.exe`.
 
 ## Build Features
 
@@ -45,7 +60,10 @@ The project targets are:
 | `x86_64-unknown-linux-gnu` | Linux x86_64 |
 | `aarch64-unknown-linux-gnu` | Linux ARM64 |
 | `aarch64-apple-darwin` | macOS Apple Silicon |
-| `x86_64-pc-windows-msvc` | Windows x86_64 |
+| `x86_64-pc-windows-gnu` | Windows x86_64 (mise default) |
+| `x86_64-pc-windows-msvc` | Windows x86_64 (release workflow) |
+
+The release workflow still builds the MSVC target; Windows GNU builds still need validation.
 
 Cross-compilation requires the appropriate Rust target and system linker. For example:
 

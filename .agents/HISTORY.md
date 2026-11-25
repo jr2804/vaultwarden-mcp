@@ -18,4 +18,4 @@ Acts as simple long-term memory for the project.
 
 ## Entries
 
-[None yet — add entries as decisions are made.]
+| 2026-11-25 | Use mise platform fragments; default Windows x64 to GNU | Conda provides GCC/binutils; release stays MSVC pending GNU validation. | uncommitted |
